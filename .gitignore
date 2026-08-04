@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Datasets (never commit)
+data/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tif
+*.tiff
+
+# Training / experiment outputs
+runs/
+weights/
+*.pt
+*.engine
+*.trt
+
+# Exported artifacts (never commit; versioned via HF private repo)
+*.onnx
+*.yaml.eval
+export/
+
+# Local credentials (never commit)
+.local/
+# Exception: the template example is committed so the format is documented.
+!.local/credentials.env.example
+
+# IDE / editor / agent
+.vscode/
+.idea/
+.opencode/
+.codex/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+ruff_cache/
+.pytest_cache/

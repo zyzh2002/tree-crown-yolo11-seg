@@ -1,0 +1,12 @@
+# Tree-crown segmentation dataset definition.
+# `classes` MUST stay identical to the `classes` list published in model.yaml
+# (the onboard TensorRtEngine validates the ABI by name against model.yaml).
+# The real class list is a placeholder until the dataset is confirmed.
+
+path: data/                 # dataset root (git-ignored)
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: tree-crown

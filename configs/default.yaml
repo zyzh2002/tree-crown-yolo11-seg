@@ -1,0 +1,30 @@
+# Default training configuration for tree-crown YOLO11-seg.
+# Overridable via CLI flags on train.py (e.g. --epochs 100).
+
+data: data.yaml
+
+model: yolov11n-seg.pt   # model variant; use a -seg variant for instance segmentation
+
+task: segment
+
+# Input resolution (fixed for the onboard contract: 1280x1280 NCHW).
+imgsz: 1280
+
+epochs: 100
+batch: 16
+imgsz_batch: 16
+
+# Training device: auto-select GPU if available.
+device: 0
+
+# Reproducibility.
+seed: 0
+deterministic: true
+
+# Export settings (used by export.py).
+export:
+  imgsz: 1280
+  opset: 17
+  simplify: true
+  dynamic: false
+  half: false

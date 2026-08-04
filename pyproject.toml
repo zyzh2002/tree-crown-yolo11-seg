@@ -1,0 +1,38 @@
+[project]
+name = "tree-crown-training"
+version = "0.1.0"
+description = "Training side of the tree-crown YOLO11-seg detection stack: train, export ONNX, publish to an HF private repo."
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = [
+    "ultralytics>=8.3.0",
+    "onnx>=1.16.0",
+    "huggingface_hub>=0.24.0",
+    "pyyaml>=6.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+# E501 is handled by the formatter; line-length is enforced separately.
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
