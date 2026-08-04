@@ -75,4 +75,11 @@ target_trt: "8.5.2"       # onboard TensorRT version
 
 - Actual tree-crown class list (placeholder in `data.yaml` until dataset is confirmed).
 - Dataset size / provenance / versioning (DVC vs `.gitignore`).
-- HF repo id and owner namespace.
+
+## Resolved Decisions
+
+- **HF repo**: `zyzh0/tree-crown-yolo11-seg` (private, owner `zyzh0`). Verified SSH
+  read/write access to `git@hf.co:zyzh0/tree-crown-yolo11-seg`.
+- **Publish mechanism**: SSH `git push` by default (uses local SSH key, no token);
+  token-based `huggingface_hub` upload is the fallback (`--token` / `--env`).
+- `git-lfs` required for `*.onnx`; the HF repo `.gitattributes` already maps `*.onnx` to LFS.
