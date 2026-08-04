@@ -1,18 +1,19 @@
 """Publish a trained YOLO11-seg ONNX + model.yaml to a Hugging Face private repo.
 
 The ONNX + model.yaml form the external ABI contract consumed by the onboard
-repo. Publishing is done over SSH (git push) by default, which uses the local
-SSH key and needs no token. A token-based path (huggingface_hub) is available
-as a fallback via --token or HF_TOKEN in .local/credentials.env.
+repo. Publishing uses a Hugging Face token (huggingface_hub) by default, read
+from .local/credentials.env (mode 600, git-ignored) unless --token is given.
+An SSH fallback (git push to git@hf.co) is available via --ssh.
 
 ONNX files are large and stored on HF via Git LFS (the repo .gitattributes
-already maps *.onnx to LFS). git-lfs must be installed and 'git lfs install'
-run once.
+already maps *.onnx to LFS). The token path handles LFS automatically; the SSH
+path requires git-lfs installed and 'git lfs install' run once.
 
 Usage:
     python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
     python publish.py --tag v1.0.0 --origin <path-to-onnx>  # publish an existing ONNX
-    python publish.py --tag v1.0.0 --weights <onnx> --token <token>  # token fallback
+    python publish.py --tag v1.0.0 --weights <onnx> --token <token>  # explicit token
+    python publish.py --tag v1.0.0 --weights <onnx> --ssh          # SSH auth
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ MODEL_NAME = "tree-crown-yolo11-seg"
 DEFAULT_TARGET_TRT = "8.5.2"
 DEFAULT_HF_REPO = "zyzh0/tree-crown-yolo11-seg"
 DEFAULT_HF_SSH = "git@hf.co:zyzh0/tree-crown-yolo11-seg"
+DEFAULT_CREDENTIALS = ".local/credentials.env"
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -197,8 +199,11 @@ def main() -> int:
     parser.add_argument("--hf-repo", default=DEFAULT_HF_REPO, help="HF private repo id (token path).")
     parser.add_argument("--hf-ssh", default=DEFAULT_HF_SSH, help="HF SSH URL (SSH path).")
     parser.add_argument("--target-trt", default=DEFAULT_TARGET_TRT, help="Onboard TensorRT baseline version.")
-    parser.add_argument("--token", help="HF_TOKEN. When set, uses token upload instead of SSH.")
-    parser.add_argument("--env", help="Read HF_TOKEN from an env file (e.g. .local/credentials.env).")
+    parser.add_argument("--token", help="HF_TOKEN. Overrides token from --env.")
+    parser.add_argument(
+        "--env", default=DEFAULT_CREDENTIALS, help="File with HF_TOKEN (default: .local/credentials.env)."
+    )
+    parser.add_argument("--ssh", action="store_true", help="Use SSH git push instead of token.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     args = parser.parse_args()
 
@@ -217,13 +222,11 @@ def main() -> int:
         logger.info("Classes: %s", classes)
         logger.info("train_commit: %s", train_commit)
 
-        if args.token:
-            _publish_token(onnx, model_yaml, args.hf_repo, args.tag, args.token)
-        elif args.env:
-            token = _load_token_from_env(args.env)
-            _publish_token(onnx, model_yaml, args.hf_repo, args.tag, token)
-        else:
+        if args.ssh:
             _publish_ssh(onnx, model_yaml, args.hf_ssh, args.tag)
+        else:
+            token = args.token or _load_token_from_env(args.env)
+            _publish_token(onnx, model_yaml, args.hf_repo, args.tag, token)
         return 0
     except Exception as exc:  # noqa: BLE001 - top-level error funnel
         logger.error("Publish failed: %s", exc)

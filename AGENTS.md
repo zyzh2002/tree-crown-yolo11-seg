@@ -82,8 +82,8 @@ python export.py --weights runs/segment/train/weights/best.pt --imgsz 1280
 
 ```bash
 python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
-# SSH (default): uses git@hf.co, no token needed.
-# Token fallback: python publish.py --tag v1.0.0 --weights <onnx> --token <HF_TOKEN>
+# Token (default): reads HF_TOKEN from .local/credentials.env.
+# SSH alternative: python publish.py --tag v1.0.0 --weights <onnx> --ssh
 ```
 
 ### Lint
@@ -95,12 +95,12 @@ ruff format --check .
 
 ## Credential Management
 
-- Publishing to HF is done over **SSH by default** (`git push` to `git@hf.co`),
-  using the local SSH key. No token is required for the SSH path.
-- `git-lfs` must be installed and `git lfs install` run once (HF stores `*.onnx`
+- Publishing to HF uses a **token by default** (`huggingface_hub` upload), read
+  from the git-ignored `.local/credentials.env` (mode `600`, never committed).
+  Override with `--token` or `--env`.
+- An SSH fallback is available via `--ssh` (`git push` to `git@hf.co`), which
+  needs `git-lfs` installed and `git lfs install` run once (HF stores `*.onnx`
   via LFS).
-- A token-based fallback is available via `--token` or `--env` (reads `HF_TOKEN`
-  from the git-ignored `.local/credentials.env`, mode `600`, never committed).
 - Never log or commit a token.
 
 ## Git Workflow

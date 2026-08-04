@@ -78,8 +78,10 @@ target_trt: "8.5.2"       # onboard TensorRT version
 
 ## Resolved Decisions
 
-- **HF repo**: `zyzh0/tree-crown-yolo11-seg` (private, owner `zyzh0`). Verified SSH
-  read/write access to `git@hf.co:zyzh0/tree-crown-yolo11-seg`.
-- **Publish mechanism**: SSH `git push` by default (uses local SSH key, no token);
-  token-based `huggingface_hub` upload is the fallback (`--token` / `--env`).
-- `git-lfs` required for `*.onnx`; the HF repo `.gitattributes` already maps `*.onnx` to LFS.
+- **HF repo**: `zyzh0/tree-crown-yolo11-seg` (private, owner `zyzh0`). Verified
+  read/write access via both token and SSH (`git@hf.co:zyzh0/tree-crown-yolo11-seg`).
+- **Publish mechanism**: token-based `huggingface_hub` upload by default
+  (`HF_TOKEN` from `.local/credentials.env`, mode 600); SSH `git push` is the
+  fallback via `--ssh`.
+- `git-lfs` required for the SSH path (`*.onnx`); the HF repo `.gitattributes`
+  already maps `*.onnx` to LFS.

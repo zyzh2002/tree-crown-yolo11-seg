@@ -28,9 +28,7 @@ weights/
 export/
 
 # Local credentials (never commit)
-.local/
-!.local/
-# Exception: the template example is committed so the format is documented.
+.local/*
 !.local/credentials.env.example
 
 # IDE / editor / agent

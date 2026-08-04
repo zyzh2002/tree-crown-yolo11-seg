@@ -14,10 +14,10 @@
 python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
 ```
 
-- **默认走 SSH**：`git push` 到 `git@hf.co:zyzh0/tree-crown-yolo11-seg`，使用本地 SSH key，无需 token。
-- 需要 `git-lfs`（HF 用 LFS 存储 `*.onnx`），安装后先执行一次 `git lfs install`。
-- token 方式可选：`--token <HF_TOKEN>` 或 `--env`（从 `.local/credentials.env` 读取 HF_TOKEN）。
-- `--tag` 为版本号（如 `v1.0.0`），写入 `model.yaml` 的 `version` 字段，并以 git tag 形式推送。
+- **默认走 token**：`huggingface_hub` 上传，`HF_TOKEN` 从 `.local/credentials.env`（权限 600，git 忽略）读取。
+- 可用 `--token <HF_TOKEN>` 或 `--env <文件>` 覆盖凭据来源。
+- SSH 方式可选：`--ssh`（`git push` 到 `git@hf.co`），需要 `git-lfs`（安装后先执行一次 `git lfs install`）。
+- `--tag` 为版本号（如 `v1.0.0`），写入 `model.yaml` 的 `version` 字段。
 - 发布产物含：ONNX 权重 + `model.yaml`（模型 ABI 契约）。
 
 ## 版本契约

@@ -63,9 +63,8 @@ python export.py --weights runs/segment/train/weights/best.pt --imgsz 1280
 python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
 ```
 
-- 默认走 SSH（`git@hf.co`），使用本地 SSH key，无需 token。
-- 需要 `git-lfs`（`git lfs install` 一次）。
-- token 方式可选（`--token` 或 `--env` 读取 `.local/credentials.env` 中的 `HF_TOKEN`）。
+- 默认走 token（`huggingface_hub`），`HF_TOKEN` 从 `.local/credentials.env`（权限 600）读取。
+- SSH 方式可选：`--ssh`（`git push` 到 `git@hf.co`），需要 `git-lfs`（`git lfs install` 一次）。
 - 发布时自动生成并上传 `model.yaml`（含版本、输入/输出、类别、`train_commit`、`target_trt`）。
 - 详情见 [publishing.md](publishing.md)。
 
@@ -79,6 +78,6 @@ ruff format --check .
 ## 排障
 
 - **导入失败 / 缺依赖**：`uv sync` 后仍未解决，检查 Python 版本与网络。
+- **发布失败（token）**：确认 `.local/credentials.env` 存在且含有效的 `HF_TOKEN`，且 token 对该私有仓库有写权限。
 - **发布失败（SSH）**：确认本地 SSH key 已加入 HF 账号、git-lfs 已安装，且对 `zyzh0/tree-crown-yolo11-seg` 有写权限。
-- **发布失败（token）**：确认 `--token` 正确，或 `.local/credentials.env` 存在且含 `HF_TOKEN`。
 - **类别不一致**：确认 `data.yaml` 与最新发布 `model.yaml` 的 `classes` 完全一致。
