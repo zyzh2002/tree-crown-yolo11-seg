@@ -29,6 +29,7 @@ export/
 
 # Local credentials (never commit)
 .local/
+!.local/
 # Exception: the template example is committed so the format is documented.
 !.local/credentials.env.example
 
