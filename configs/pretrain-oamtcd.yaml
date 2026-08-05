@@ -17,9 +17,11 @@ task: segment
 imgsz: 1280
 
 epochs: 50
-# Conservative batch for an 8 GiB GPU at 1280x1280. Start at 1, then raise to
-# 2 / 4 after measuring headroom on the target GPU (RTX 2070 Super 8GB).
-batch: 1
+# Conservative batch for an 8 GiB GPU at 1280x1280.
+# Measured (RTX 2070 Super 8GB, OAM-TCD): batch 1/2/4/8 all fit (~7.97 GiB
+# peak, near the 8 GiB ceiling); batch 16 OOMs (auto-reduced to 8). batch 4
+# leaves headroom away from the memory ceiling for stable multi-epoch runs.
+batch: 4
 
 # Training device: auto-select GPU if available.
 device: 0
