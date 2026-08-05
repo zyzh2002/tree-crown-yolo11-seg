@@ -30,7 +30,9 @@ data/
 ```
 
 - `data.yaml` 的 `names` 类别列表是**对外契约**，必须与发布时 `model.yaml` 的类别完全一致。
-  当前为占位（`tree-crown`），真实类别待确认后填入。
+  V1 固定为四种西安常见行道树：`platanus`（悬铃木）、`styphnolobium-japonicum`（国槐）、
+  `ginkgo-biloba`（银杏）、`koelreuteria-paniculata`（栾树）。若数据资格门满足，可追加
+  第 5 类 `other-tree`（其他树种），详见 `.agents/docs/specs/2026-08-05-tree-crown-age-estimation-design.md`。
 
 ## 训练
 
@@ -44,7 +46,7 @@ python train.py --config configs/default.yaml
 ## 验证
 
 ```bash
-python train.py --config configs/default.yaml --mode validate
+python train.py --config configs/default.yaml --mode validate --weights runs/segment/train/weights/best.pt
 ```
 
 ## 导出 ONNX
