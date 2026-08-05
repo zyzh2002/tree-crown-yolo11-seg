@@ -11,16 +11,18 @@ publish workflow is runnable end-to-end, mirroring the onboard repo conventions.
 2. [x] Write `.gitignore` (data, weights, ONNX, venv, `.local/`, runs).
 3. [x] Write `AGENTS.md`, `CLAUDE.md`.
 4. [x] Write `pyproject.toml` (ultralytics, onnx, huggingface_hub, pyyaml, ruff).
-5. [x] Write `data.yaml` (placeholder class list).
+5. [x] Write `data.yaml` (single-class `tree-crown`, confirmed).
 6. [x] Write `README.md`, `docs/` (Chinese).
 7. [x] Write `.agents/docs/` (spec + plan).
-8. [ ] Write `configs/default.yaml`.
-9. [ ] Scaffold `train.py`, `export.py`, `publish.py`.
-10. [ ] Verify scripts run (`--help`) and `ruff check` passes.
-11. [ ] Commit with `chore: scaffold training repo`.
+8. [x] Write `configs/default.yaml`.
+9. [x] Scaffold `train.py`, `export.py`, `publish.py`.
+10. [x] Verify scripts run (`--help`) and `ruff check` passes.
+11. [x] Commit with `chore: scaffold training repo`.
 
 ## Follow-ups
 
-- Confirm real class list and update `data.yaml`.
-- Confirm HF repo id + owner namespace; wire into `publish.py`.
 - First real training run to lock `configs/default.yaml`.
+- Implement `prepare_geotree.py` / `prepare_oamtcd.py` (separate task, per the age-estimation
+  design spec).
+- Align training config with the scripts' actual behavior (unused `imgsz_batch` / `task`,
+  `deterministic` passthrough, fixed export naming).
