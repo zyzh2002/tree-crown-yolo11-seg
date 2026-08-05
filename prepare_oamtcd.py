@@ -104,7 +104,11 @@ def segmentation_to_yolo(seg, width: int, height: int) -> list[float] | None:
     the instance is degenerate and must be dropped.
     """
     if isinstance(seg, dict):
-        rle = seg  # COCO compressed RLE dict: {"counts": ..., "size": [H, W]}
+        rle = seg  # COCO RLE dict: {"counts": ..., "size": [H, W]}
+        # counts may be a compressed str/bytes (coco_mask.decode handles it) or
+        # an uncompressed list of run-lengths (decode needs frPyObjects first).
+        if not isinstance(rle.get("counts"), (str, bytes)):
+            rle = coco_mask.frPyObjects([rle], rle["size"][0], rle["size"][1])[0]
         binary = coco_mask.decode(rle)  # type: ignore[arg-type]
         if binary is None or binary.sum() == 0:
             return None

@@ -50,6 +50,28 @@ def test_rle_decode_contour_normalization() -> None:
     assert all(0.0 <= v <= 1.0 for v in coords)
 
 
+def test_uncompressed_rle_decode() -> None:
+    # Build a known binary mask, then express it as an UNCOMPRESSED RLE
+    # (counts as a list of alternating run lengths from 0) to exercise the
+    # frPyObjects path that the OAM-TCD data uses.
+    binary = np.zeros((10, 10), dtype=np.uint8)
+    binary[2:8, 2:8] = 1
+    flat = binary.reshape(-1, order="F")
+    runs: list[int] = [0]
+    prev = 0
+    for bit in flat:
+        if bit != prev:
+            runs.append(0)
+            prev = bit
+        runs[-1] += 1
+    rle = {"counts": runs, "size": [10, 10]}
+    coords = prepare_oamtcd.segmentation_to_yolo(rle, 10, 10)
+    assert coords is not None
+    assert len(coords) % 2 == 0
+    assert len(coords) >= 6
+    assert all(0.0 <= v <= 1.0 for v in coords)
+
+
 def test_less_than_three_points_dropped() -> None:
     seg = [[0, 0, 10, 0]]  # flat, 2 points
     assert prepare_oamtcd.segmentation_to_yolo(seg, WIDTH, HEIGHT) is None
