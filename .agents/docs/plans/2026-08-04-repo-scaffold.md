@@ -22,7 +22,9 @@ publish workflow is runnable end-to-end, mirroring the onboard repo conventions.
 ## Follow-ups
 
 - First real training run to lock `configs/default.yaml`.
-- Implement `prepare_geotree.py` / `prepare_oamtcd.py` (separate task, per the age-estimation
-  design spec).
+- Implement `prepare_oamtcd.py` for OAM-TCD single-class tree-crown pretraining
+  (separate task, per the age-estimation design spec). `prepare_geotree.py` is
+  **rejected**: geotree labels are detection boxes without segmentation polygons
+  and too many near-empty placeholder tiles, so it cannot contribute crowns.
 - Align training config with the scripts' actual behavior (unused `imgsz_batch` / `task`,
   `deterministic` passthrough, fixed export naming).

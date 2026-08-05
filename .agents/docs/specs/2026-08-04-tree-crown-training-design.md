@@ -60,6 +60,8 @@ target_trt: "8.5.2"       # onboard TensorRT version
 2. Mirror onboard conventions into `AGENTS.md`, `CLAUDE.md`, `docs/`, `docs/README.md`.
 3. Create directory structure and `.gitignore` (data, weights, ONNX, venv, `.local/`).
 4. Write `README.md`, `pyproject.toml`, `data.yaml` (placeholder classes).
+   > Superseded: the class list is now fixed at four Xi'an species — see
+   > `.agents/docs/specs/2026-08-05-tree-crown-age-estimation-design.md`.
 5. Scaffold `train.py`, `export.py`, `publish.py` skeletons.
 6. Commit with an English conventional commit (e.g. `chore: scaffold training repo`).
 
@@ -74,6 +76,7 @@ target_trt: "8.5.2"       # onboard TensorRT version
 ## Open Items
 
 - Actual tree-crown class list (placeholder in `data.yaml` until dataset is confirmed).
+  > Superseded: resolved to four Xi'an species in the 2026-08-05 age-estimation design spec.
 - Dataset size / provenance / versioning (DVC vs `.gitignore`).
 
 ## Resolved Decisions

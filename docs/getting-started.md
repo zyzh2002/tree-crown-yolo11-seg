@@ -34,6 +34,27 @@ data/
   `ginkgo-biloba`（银杏）、`koelreuteria-paniculata`（栾树）。若数据资格门满足，可追加
   第 5 类 `other-tree`（其他树种），详见 `.agents/docs/specs/2026-08-05-tree-crown-age-estimation-design.md`。
 
+## 公开预训练数据（OAM-TCD）
+
+在本地西安四类标注就绪前，先用 OAM-TCD（`restor/tcd`）做**单类树冠预训练**，生成初始化权重。
+
+- OAM-TCD 只用于**单类 `tree-crown` 预训练**，产物**绝不能**作为四类模型发布，也**绝不能**
+  用 `publish.py` 发布。
+- 转换脚本只保留 `tree` 单树实例（COCO `category_id=2`），丢弃 `canopy` 群体（`category_id=1`）。
+- 根目录 `data.yaml` 是最终四类 ABI，**不会**被 OAM 单类 `data.yaml` 覆盖（两者是不同文件）。
+
+```bash
+# 1. 转换（下载约 3.5 GB，预留 10-20 GB 磁盘）
+.venv/bin/python prepare_oamtcd.py --output data/oamtcd
+
+# 2. 预训练（batch 从 1 起步，实测后升 2/4）
+.venv/bin/python train.py --config configs/pretrain-oamtcd.yaml
+```
+
+- 转换产物含 `data.yaml`（单类 `tree-crown`）与 `manifest.json`（split 统计、`oam_id`
+  跨 split 保证、来源 revision）。
+- 用 `--limit N` 可先做小子集冒烟：`.venv/bin/python prepare_oamtcd.py --output data/oamtcd-smoke --limit 40`。
+
 ## 训练
 
 ```bash

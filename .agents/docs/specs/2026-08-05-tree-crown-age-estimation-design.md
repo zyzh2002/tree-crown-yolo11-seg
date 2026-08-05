@@ -265,7 +265,7 @@ The following sources cannot contribute `other-tree` labels:
 | Source | Reason |
 |---|---|
 | OAM-TCD / `restor/tcd` | Annotates generic `tree` / `tree-canopy`; whether a crown is a target species is unknown. Mapping to `other-tree` would mislabel potential target trees. |
-| geotree | Generic crown class only, no species labels. |
+| geotree | **Rejected entirely.** Detection-box annotations only (no segmentation polygons) and too many near-empty placeholder tiles; cannot contribute crown instances to instance-segmentation training. |
 | Urban Street Tree Dataset | Has species labels but is ground/side-view; must not be mixed into the final top-down YOLO11-seg training set. |
 | TreeAI partially labeled images | Unlabeled instances are treated as background; cannot contribute to complete multi-class instance-segmentation training. |
 | Local imagery with unverifiable species | Cannot be filled with appearance-based guesses. |
