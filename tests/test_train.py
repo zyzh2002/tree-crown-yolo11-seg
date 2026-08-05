@@ -105,6 +105,9 @@ def test_defaults_when_config_missing() -> None:
     assert kwargs["batch"] == 16
     assert kwargs["workers"] == 8
     assert kwargs["deterministic"] is True
+    # Empty project lets ultralytics prepend runs/<task>/ without a redundant
+    # nested runs/segment/runs/... path.
+    assert kwargs["project"] == ""
 
 
 def test_validate_forwarded_kwargs() -> None:

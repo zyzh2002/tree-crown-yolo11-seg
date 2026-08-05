@@ -83,7 +83,7 @@ def _run_training(config: dict, mode: str, **overrides) -> None:
             "cache": False,
             "amp": True,
             "patience": 100,
-            "project": "runs",
+            "project": "",
             "name": "train",
             "plots": True,
             "single_cls": False,

@@ -40,5 +40,7 @@ cache: false
 plots: true
 amp: true
 
-project: runs/segment
+# Output under runs/segment/ (ultralytics prepends runs/<task>/). Empty project
+# keeps the path clean: runs/segment/oamtcd-pretrain.
+project: ""
 name: oamtcd-pretrain
