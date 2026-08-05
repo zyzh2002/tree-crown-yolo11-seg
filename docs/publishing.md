@@ -18,14 +18,17 @@ python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
 - 可用 `--token <HF_TOKEN>` 或 `--env <文件>` 覆盖凭据来源。
 - SSH 方式可选：`--ssh`（`git push` 到 `git@hf.co`），需要 `git-lfs`（安装后先执行一次 `git lfs install`）。
 - `--tag` 为版本号（如 `v1.0.0`），写入 `model.yaml` 的 `version` 字段。
-- 发布产物含：ONNX 权重 + `model.yaml`（模型 ABI 契约）。
+- 发布产物含：ONNX 权重 + `model.yaml`（模型 ABI 契约）+ `SHA256SUMS`（校验清单）。
+  每次发布是**一个原子提交 + 一个不可移动 tag**，三个文件同属该 tag 指向的提交。
 
 ## 版本契约
 
-- **发布即契约**：一旦发布，ONNX + `model.yaml` 就是对外契约。任何改动必须**升版本号**，
-  不能静默覆盖。
+- **发布即契约**：一旦发布，ONNX + `model.yaml` + `SHA256SUMS` 就是对外契约。任何改动必须**升版本号**，
+  不能静默覆盖；已存在的 tag 会被拒绝，不会移动。
 - 每次发布应记录：HF 仓库 id + 版本 tag、`model.yaml` 输入/输出名与 dtype/shape、类别列表、
   训练 git commit（`train_commit`）。
+- `SHA256SUMS` 由 `publish.py` 自动生成，包含 `model.onnx` 与 `model.yaml` 两行；机载侧
+  `fetch_model.sh` 会用 `sha256sum --check --strict` 校验后再安装。
 
 ## model.yaml 字段
 

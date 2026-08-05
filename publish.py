@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import shutil
 import subprocess
@@ -114,6 +115,24 @@ def _write_model_yaml(meta: dict, path: Path) -> None:
         yaml.safe_dump(meta, fh, sort_keys=False, allow_unicode=False)
 
 
+def _sha256(path: Path) -> str:
+    """Streaming SHA-256 of a file, safe for large model weights."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_checksums(onnx: Path, model_yaml: Path, output: Path) -> None:
+    """Write a SHA256SUMS manifest for the two release artifacts."""
+    output.write_text(
+        f"{_sha256(onnx)}  {onnx.name}\n"
+        f"{_sha256(model_yaml)}  {model_yaml.name}\n",
+        encoding="ascii",
+    )
+
+
 def _build_meta(tag: str, classes: list[str], train_commit: str, onnx_path: Path, target_trt: str) -> dict:
     info = _inspect_onnx(onnx_path)
     return {
@@ -130,6 +149,7 @@ def _build_meta(tag: str, classes: list[str], train_commit: str, onnx_path: Path
 def _publish_ssh(
     onnx: Path,
     model_yaml: Path,
+    checksums: Path,
     hf_ssh: str,
     tag: str,
 ) -> None:
@@ -140,8 +160,15 @@ def _publish_ssh(
         repo = work / "repo"
         shutil.copy2(onnx, repo / onnx.name)
         shutil.copy2(model_yaml, repo / model_yaml.name)
-        _run_git(["add", onnx.name, model_yaml.name], cwd=repo)
-        _run_git(["commit", "-m", f"publish {tag}: {onnx.name} + {model_yaml.name}"], cwd=repo)
+        shutil.copy2(checksums, repo / checksums.name)
+        _run_git(["add", onnx.name, model_yaml.name, checksums.name], cwd=repo)
+        _run_git(["commit", "-m", f"publish {tag}: {onnx.name} + {model_yaml.name} + {checksums.name}"], cwd=repo)
+        # Refuse to move an existing tag.
+        try:
+            _run_git(["rev-parse", "-q", "--verify", f"refs/tags/{tag}"], cwd=repo)
+            raise RuntimeError(f"tag {tag} already exists; refusing to overwrite")
+        except subprocess.CalledProcessError:
+            pass
         _run_git(["tag", tag], cwd=repo)
         _run_git(["push", "origin", "main", "--tags"], cwd=repo)
         logger.info("Pushed tag %s to %s", tag, hf_ssh)
@@ -150,30 +177,40 @@ def _publish_ssh(
 def _publish_token(
     onnx: Path,
     model_yaml: Path,
+    checksums: Path,
     hf_repo: str,
     tag: str,
     token: str,
 ) -> None:
-    from huggingface_hub import HfApi, create_repo
+    from huggingface_hub import CommitOperationAdd, HfApi, create_repo
 
     logger.info("Publishing via token to %s (tag %s)", hf_repo, tag)
     create_repo(repo_id=hf_repo, token=token, private=True, exist_ok=True)
     api = HfApi(token=token)
-    api.upload_file(
-        path_or_fileobj=str(onnx),
-        path_in_repo=onnx.name,
+
+    # Guard against moving an existing immutable tag.
+    existing = [t.name for t in api.list_tags(repo_id=hf_repo, repo_type="model")]
+    if tag in existing:
+        raise RuntimeError(f"tag {tag} already exists; refusing to overwrite")
+
+    commit = api.create_commit(
         repo_id=hf_repo,
         repo_type="model",
+        commit_message=f"publish {tag}",
+        operations=[
+            CommitOperationAdd(path_in_repo=onnx.name, path_or_fileobj=str(onnx)),
+            CommitOperationAdd(path_in_repo=model_yaml.name, path_or_fileobj=str(model_yaml)),
+            CommitOperationAdd(path_in_repo=checksums.name, path_or_fileobj=str(checksums)),
+        ],
     )
-    logger.info("Uploaded %s", onnx.name)
-    api.upload_file(
-        path_or_fileobj=str(model_yaml),
-        path_in_repo=model_yaml.name,
+    logger.info("Committed %s + %s + %s (oid %s)", onnx.name, model_yaml.name, checksums.name, commit.oid)
+    api.create_tag(
         repo_id=hf_repo,
         repo_type="model",
+        tag=tag,
+        revision=commit.oid,
     )
-    logger.info("Uploaded %s", model_yaml.name)
-    logger.info("Publish complete via token. Handoff: repo=%s tag=%s", hf_repo, tag)
+    logger.info("Publish complete via token. Handoff: repo=%s tag=%s commit=%s", hf_repo, tag, commit.oid)
 
 
 def _resolve_onnx(weights: str) -> Path:
@@ -217,16 +254,18 @@ def main() -> int:
         meta = _build_meta(args.tag, classes, train_commit, onnx, args.target_trt)
         model_yaml = onnx.parent / "model.yaml"
         _write_model_yaml(meta, model_yaml)
+        checksums = onnx.parent / "SHA256SUMS"
+        _write_checksums(onnx, model_yaml, checksums)
 
         logger.info("Publishing to HF (tag %s): %s", args.tag, onnx.name)
         logger.info("Classes: %s", classes)
         logger.info("train_commit: %s", train_commit)
 
         if args.ssh:
-            _publish_ssh(onnx, model_yaml, args.hf_ssh, args.tag)
+            _publish_ssh(onnx, model_yaml, checksums, args.hf_ssh, args.tag)
         else:
             token = args.token or _load_token_from_env(args.env)
-            _publish_token(onnx, model_yaml, args.hf_repo, args.tag, token)
+            _publish_token(onnx, model_yaml, checksums, args.hf_repo, args.tag, token)
         return 0
     except Exception as exc:  # noqa: BLE001 - top-level error funnel
         logger.error("Publish failed: %s", exc)
