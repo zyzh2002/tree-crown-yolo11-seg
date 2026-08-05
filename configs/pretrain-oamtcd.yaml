@@ -1,0 +1,44 @@
+# OAM-TCD single-class tree-crown pretraining configuration.
+# Produces a weight-initialization checkpoint for the final Xi'an 4-species
+# model. The output is NEVER published via publish.py.
+#
+# Data must first be converted:
+#   python prepare_oamtcd.py --output data/oamtcd
+#
+# Overridable via CLI flags on train.py (e.g. --imgsz 1280 --batch 2).
+
+data: data/oamtcd/data.yaml   # single-class tree-crown dataset (converted)
+
+model: yolo11n-seg.pt         # official Ultralytics YOLO11-seg variant
+
+task: segment
+
+# Input resolution (fixed for the onboard contract: 1280x1280 NCHW).
+imgsz: 1280
+
+epochs: 50
+# Conservative batch for an 8 GiB GPU at 1280x1280. Start at 1, then raise to
+# 2 / 4 after measuring headroom on the target GPU (RTX 2070 Super 8GB).
+batch: 1
+
+# Training device: auto-select GPU if available.
+device: 0
+
+# System RAM is tight (7.7 GiB total); keep workers low.
+workers: 2
+
+# Reproducibility.
+seed: 0
+deterministic: true
+
+# OAM-TCD is a single generic class; single_cls keeps the loss single-class.
+single_cls: true
+
+# Keep the run on disk / avoid caching the large dataset in RAM.
+patience: 20
+cache: false
+plots: true
+amp: true
+
+project: runs/segment
+name: oamtcd-pretrain
