@@ -3,7 +3,7 @@
 
 data: data.yaml
 
-model: yolov11n-seg.pt   # model variant; use a -seg variant for instance segmentation
+model: yolo11n-seg.pt   # official Ultralytics YOLO11-seg variant
 
 task: segment
 
@@ -11,8 +11,9 @@ task: segment
 imgsz: 1280
 
 epochs: 100
-batch: 16
-imgsz_batch: 16
+# Conservative batch for an 8 GiB GPU at 1280x1280. Raise it only after a
+# short run (or `batch: -1` AutoBatch) confirms headroom on the target GPU.
+batch: 4
 
 # Training device: auto-select GPU if available.
 device: 0
