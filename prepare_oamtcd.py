@@ -116,7 +116,9 @@ def segmentation_to_yolo(seg, width: int, height: int) -> list[float] | None:
     elif isinstance(seg, list) and len(seg) > 0:
         if len(seg) > 1:
             # COCO format: each polygon is a flat [x1, y1, x2, y2, ...] array.
-            # merge_multi_segment expects [[[x, y], ...], ...] instead.
+            # merge_multi_segment reshapes inputs to (N, 2) internally, so the
+            # explicit reshape keeps the points as contiguous (N, 2) for the
+            # downstream np.concatenate.
             polygons = [np.array(p, dtype=np.float64).reshape(-1, 2) for p in seg]
             merged = merge_multi_segment(polygons)
             pts = np.concatenate(merged, axis=0).astype(np.float64)
@@ -164,8 +166,11 @@ def write_image_and_labels(
     images_dir: Path,
     labels_dir: Path,
     stats: dict,
-) -> None:
-    """Write one image .jpg and its YOLO .txt label into the split dirs."""
+) -> int:
+    """Write one image .jpg and its YOLO .txt label into the split dirs.
+
+    Returns the number of instances kept for this row.
+    """
     image_id = int(row["image_id"])
     width = int(row["width"])
     height = int(row["height"])
@@ -192,6 +197,7 @@ def write_image_and_labels(
         kept += 1
     label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="ascii")
     stats["instances"] += kept
+    return kept
 
 
 def _extract_image_bytes(row: dict) -> bytes | None:
@@ -232,13 +238,14 @@ def prepare(output: Path, limit: int | None = None, skip_download: bool = False)
 
     stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0}
     split_counts = {"train": 0, "val": 0, "test": 0}
+    split_instances = {"train": 0, "val": 0, "test": 0}
     oam_split: dict[str, set[str]] = {"train": set(), "val": set(), "test": set()}
 
     for row in df.iter_rows(named=True):
         split = row_split(row)
         split_counts[split] += 1
         oam_split[split].add(str(row["oam_id"]))
-        write_image_and_labels(
+        split_instances[split] += write_image_and_labels(
             row,
             split,
             output / "images" / split,
@@ -247,7 +254,7 @@ def prepare(output: Path, limit: int | None = None, skip_download: bool = False)
         )
 
     _write_data_yaml(output)
-    _write_manifest(output, df, stats, split_counts, oam_split, limit)
+    _write_manifest(output, df, stats, split_counts, split_instances, oam_split, limit)
     return _load_manifest(output)
 
 
@@ -263,7 +270,7 @@ def _write_data_yaml(output: Path) -> None:
     (output / "data.yaml").write_text(content, encoding="utf-8")
 
 
-def _write_manifest(output, df, stats, split_counts, oam_split, limit) -> None:
+def _write_manifest(output, df, stats, split_counts, split_instances, oam_split, limit) -> None:
     manifest = {
         "source": {
             "repo_id": REPO_ID,
@@ -280,7 +287,7 @@ def _write_manifest(output, df, stats, split_counts, oam_split, limit) -> None:
         "split": {
             s: {
                 "n_images": split_counts[s],
-                "n_instances": stats["instances"],
+                "n_instances": split_instances[s],
                 "oam_ids": sorted(oam_split[s]),
             }
             for s in ("train", "val", "test")
@@ -308,7 +315,7 @@ def main() -> int:
     _setup_logging(args.verbose)
     try:
         manifest = prepare(Path(args.output), limit=args.limit, skip_download=args.skip_download)
-        logger.info("OAM-TCD prepared. Manifeset at %s", Path(args.output) / "manifest.json")
+        logger.info("OAM-TCD prepared. Manifest at %s", Path(args.output) / "manifest.json")
         logger.info("Split: %s", manifest["split"])
         return 0
     except Exception as exc:  # noqa: BLE001 - top-level error funnel

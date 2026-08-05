@@ -175,8 +175,9 @@ def test_manifest_fields_complete(tmp_path: Path) -> None:
     df = pl.DataFrame({"oam_id": ["a", "b"], "validation_fold": [0, 4]})
     stats = {"instances": 3, "dropped_invalid": 1, "decode_error": 0}
     split_counts = {"train": 1, "val": 0, "test": 1}
+    split_instances = {"train": 2, "val": 0, "test": 1}
     oam_split = {"train": {"a"}, "val": set(), "test": {"b"}}
-    prepare_oamtcd._write_manifest(tmp_path, df, stats, split_counts, oam_split, None)
+    prepare_oamtcd._write_manifest(tmp_path, df, stats, split_counts, split_instances, oam_split, None)
     manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["source"]["repo_id"] == prepare_oamtcd.REPO_ID
     assert manifest["class_map"] == {"tree-crown": 0}
@@ -187,6 +188,8 @@ def test_manifest_fields_complete(tmp_path: Path) -> None:
     assert "train_commit" in manifest
     assert manifest["oam_split_guarantee"] == "no oam_id appears in more than one split"
     assert manifest["split"]["test"]["oam_ids"] == ["b"]
+    assert manifest["split"]["train"]["n_instances"] == 2
+    assert manifest["split"]["test"]["n_instances"] == 1
 
 
 def test_data_yaml_single_class(tmp_path: Path) -> None:
