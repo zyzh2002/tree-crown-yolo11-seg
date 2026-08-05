@@ -2,7 +2,8 @@
 
 Usage:
     python train.py --config configs/default.yaml
-    python train.py --config configs/default.yaml --mode validate
+    python train.py --config configs/default.yaml --mode validate --weights <best.pt>
+    python train.py --config configs/pretrain-oamtcd.yaml
 """
 
 from __future__ import annotations
@@ -15,6 +16,29 @@ from pathlib import Path
 import yaml
 
 logger = logging.getLogger("tree-crown.train")
+
+# Keys forwarded verbatim to ultralytics train()/val(). Falsy values (0, False)
+# are meaningful (e.g. batch=0 AutoBatch, workers=0, amp=False), so resolution
+# uses membership, never `X or default`.
+FORWARDED_KEYS = (
+    "data",
+    "imgsz",
+    "batch",
+    "device",
+    "seed",
+    "verbose",
+    "deterministic",
+    "workers",
+    "cache",
+    "amp",
+    "patience",
+    "project",
+    "name",
+    "plots",
+    "single_cls",
+)
+
+DEFAULT_MODEL = "yolo11n-seg.pt"
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -32,28 +56,38 @@ def _load_config(path: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 
+def _resolve(config: dict, overrides: dict, key: str, default):
+    """Resolve a config key: an explicit CLI override beats the config file."""
+    if key in overrides:
+        return overrides[key]
+    if key in config:
+        return config[key]
+    return default
+
+
 def _run_training(config: dict, mode: str, **overrides) -> None:
     # Import ultralytics lazily so `--help` works without the heavy dependency.
     from ultralytics import YOLO
 
-    model_path = config.get("model", "yolov11n-seg.pt")
-    logger.info("Loading model: %s", model_path)
-    model = YOLO(model_path)
-
-    data = config.get("data", "data.yaml")
-    imgsz = overrides.get("imgsz") or config.get("imgsz", 1280)
-    epochs = overrides.get("epochs") or config.get("epochs", 100)
-    batch = overrides.get("batch") or config.get("batch", 16)
-    device = overrides.get("device") or config.get("device", 0)
-    seed = overrides.get("seed") or config.get("seed", 0)
-
-    common = {
-        "data": data,
-        "imgsz": imgsz,
-        "batch": batch,
-        "device": device,
-        "seed": seed,
-        "verbose": True,
+    args = {
+        key: _resolve(config, overrides, key, default)
+        for key, default in {
+            "data": "data.yaml",
+            "imgsz": 1280,
+            "batch": 16,
+            "device": 0,
+            "seed": 0,
+            "verbose": True,
+            "deterministic": True,
+            "workers": 8,
+            "cache": False,
+            "amp": True,
+            "patience": 100,
+            "project": "runs",
+            "name": "train",
+            "plots": True,
+            "single_cls": False,
+        }.items()
     }
 
     if mode == "validate":
@@ -62,13 +96,40 @@ def _run_training(config: dict, mode: str, **overrides) -> None:
             raise ValueError("--weights is required for validate mode")
         logger.info("Validating model: %s", weights)
         model = YOLO(weights)
-        results = model.val(data=data, imgsz=imgsz, batch=batch, device=device, verbose=True)
-        logger.info("Validation done. mAP50-95: %.4f", getattr(results, "box", None) and results.box.map)
+        results = model.val(
+            data=args["data"],
+            imgsz=args["imgsz"],
+            batch=args["batch"],
+            device=args["device"],
+            verbose=args["verbose"],
+        )
+        box_map = getattr(results, "box", None) and results.box.map
+        mask_map = getattr(results, "seg", None) and results.seg.map
+        logger.info("Validation done. box mAP50-95: %.4f | mask mAP50-95: %.4f", box_map, mask_map)
         return
 
-    logger.info("Starting training: epochs=%d imgsz=%d batch=%d device=%s", epochs, imgsz, batch, device)
-    model.train(epochs=epochs, **common)
-    logger.info("Training finished. Best weights at runs/segment/train/weights/best.pt")
+    model_path = config.get("model", DEFAULT_MODEL)
+    logger.info("Loading model: %s", model_path)
+    model = YOLO(model_path)
+
+    logger.info(
+        "Starting training: data=%s imgsz=%d batch=%s device=%s epochs=%d",
+        args["data"],
+        args["imgsz"],
+        args["batch"],
+        args["device"],
+        _resolve(config, overrides, "epochs", 100),
+    )
+    model.train(epochs=_resolve(config, overrides, "epochs", 100), **args)
+
+    trainer = getattr(model, "trainer", None)
+    if trainer is not None:
+        save_dir = getattr(trainer, "save_dir", None)
+        best = getattr(trainer, "best", None)
+        logger.info("Training finished. Results: %s", save_dir)
+        logger.info("Best weights: %s", best)
+    else:
+        logger.info("Training finished. Best weights at runs/segment/train/weights/best.pt")
 
 
 def main() -> int:
@@ -76,9 +137,10 @@ def main() -> int:
     parser.add_argument("--config", default="configs/default.yaml", help="Path to YAML config.")
     parser.add_argument("--mode", choices=["train", "validate"], default="train", help="Run training or validation.")
     parser.add_argument("--weights", help="Path to weights (required for validate mode).")
+    parser.add_argument("--data", help="Override dataset YAML.")
     parser.add_argument("--imgsz", type=int, help="Override input resolution.")
     parser.add_argument("--epochs", type=int, help="Override number of epochs.")
-    parser.add_argument("--batch", type=int, help="Override batch size.")
+    parser.add_argument("--batch", type=int, help="Override batch size (0 for AutoBatch).")
     parser.add_argument("--device", help="Override device (e.g. 0, 'cpu').")
     parser.add_argument("--seed", type=int, help="Override random seed.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
@@ -91,6 +153,7 @@ def main() -> int:
             k: v
             for k, v in {
                 "weights": args.weights,
+                "data": args.data,
                 "imgsz": args.imgsz,
                 "epochs": args.epochs,
                 "batch": args.batch,
