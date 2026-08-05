@@ -19,6 +19,11 @@ dev = [
     "ruff>=0.6.0",
     "pytest>=8.0.0",
 ]
+data = [
+    "datasets>=2.20.0",
+    "pycocotools>=2.0.0",
+    "polars>=1.0.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -27,6 +32,8 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+# .agents/ holds agent-facing skills/doc markdown; not project source.
+exclude = [".agents", ".superpowers", ".local"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B", "SIM"]
