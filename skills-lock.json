@@ -19,6 +19,12 @@
       "skillPath": "skills/commit-message-storyteller/SKILL.md",
       "computedHash": "ca0d63ccdfeb488294209fd40b8ce122e809931a6d5c22a105627624e4e2dece"
     },
+    "context7-cli": {
+      "source": "upstash/context7",
+      "sourceType": "github",
+      "skillPath": "skills/context7-cli/SKILL.md",
+      "computedHash": "b013e9b5af10ae7aae1cfba603c0b1158bb17b04829f00a165e7148401da65f8"
+    },
     "conventional-commit": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
