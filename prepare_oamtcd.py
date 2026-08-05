@@ -108,7 +108,9 @@ def segmentation_to_yolo(seg, width: int, height: int) -> list[float] | None:
         # counts may be a compressed str/bytes (coco_mask.decode handles it) or
         # an uncompressed list of run-lengths (decode needs frPyObjects first).
         if not isinstance(rle.get("counts"), (str, bytes)):
-            rle = coco_mask.frPyObjects([rle], rle["size"][0], rle["size"][1])[0]
+            # pycocotools frPyObjects/decode are C-extensions with weak stubs;
+            # pyright cannot infer the dict-RLE overload.
+            rle = coco_mask.frPyObjects([rle], rle["size"][0], rle["size"][1])[0]  # type: ignore[arg-type]
         binary = coco_mask.decode(rle)  # type: ignore[arg-type]
         if binary is None or binary.sum() == 0:
             return None
@@ -124,7 +126,9 @@ def segmentation_to_yolo(seg, width: int, height: int) -> list[float] | None:
             # explicit reshape keeps the points as contiguous (N, 2) for the
             # downstream np.concatenate.
             polygons = [np.array(p, dtype=np.float64).reshape(-1, 2) for p in seg]
-            merged = merge_multi_segment(polygons)
+            # merge_multi_segment accepts polygon segments (reshapes internally);
+            # pyright's stub types them as list[list], not list[ndarray].
+            merged = merge_multi_segment(polygons)  # type: ignore[arg-type]
             pts = np.concatenate(merged, axis=0).astype(np.float64)
         else:
             pts = np.array(seg[0], dtype=np.float64).reshape(-1, 2)

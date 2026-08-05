@@ -188,7 +188,7 @@ def _publish_token(
     api = HfApi(token=token)
 
     # Guard against moving an existing immutable tag.
-    existing = [t.name for t in api.list_tags(repo_id=hf_repo, repo_type="model")]
+    existing = [t.name for t in api.list_repo_refs(repo_id=hf_repo, repo_type="model").tags]
     if tag in existing:
         raise RuntimeError(f"tag {tag} already exists; refusing to overwrite")
 
