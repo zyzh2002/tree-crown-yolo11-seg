@@ -127,8 +127,7 @@ def _sha256(path: Path) -> str:
 def _write_checksums(onnx: Path, model_yaml: Path, output: Path) -> None:
     """Write a SHA256SUMS manifest for the two release artifacts."""
     output.write_text(
-        f"{_sha256(onnx)}  {onnx.name}\n"
-        f"{_sha256(model_yaml)}  {model_yaml.name}\n",
+        f"{_sha256(onnx)}  {onnx.name}\n{_sha256(model_yaml)}  {model_yaml.name}\n",
         encoding="ascii",
     )
 
