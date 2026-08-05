@@ -130,6 +130,15 @@ def test_empty_labels_write_empty_txt(tmp_path: Path) -> None:
     assert stats["instances"] == 0
 
 
+def test_decode_error_returns_zero(tmp_path: Path) -> None:
+    stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0}
+    images_dir, labels_dir = _make_dirs(tmp_path)
+    row = _row("[]", image=None)  # undecodable image
+    kept = prepare_oamtcd.write_image_and_labels(row, "train", images_dir, labels_dir, stats)
+    assert kept == 0
+    assert stats["decode_error"] == 1
+
+
 # --- split assignment ---
 
 

@@ -181,7 +181,7 @@ def write_image_and_labels(
 
     if img_bytes is None:
         stats["decode_error"] += 1
-        return
+        return 0
     image_path.write_bytes(img_bytes)
 
     lines: list[str] = []
