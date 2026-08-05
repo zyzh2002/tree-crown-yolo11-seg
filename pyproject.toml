@@ -38,4 +38,4 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.uv]
-index-url = "https://mirrors.cloud.tencent.com/pypi/simple/"
+index-url = "https://mirrors.cernet.edu.cn/pypi/simple/"
