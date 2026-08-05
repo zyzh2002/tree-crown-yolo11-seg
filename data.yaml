@@ -1,7 +1,11 @@
-# Tree-crown segmentation dataset definition.
+# Xi'an street-tree species instance-segmentation dataset definition.
 # `classes` MUST stay identical to the `classes` list published in model.yaml
 # (the onboard TensorRtEngine validates the ABI by name against model.yaml).
-# The real class list is a placeholder until the dataset is confirmed.
+# The V1 class list is fixed by the design spec
+# (.agents/docs/specs/2026-08-05-tree-crown-age-estimation-design.md).
+#
+# `other-tree` (class 4) is added only after the data-eligibility gate passes
+# (exhaustive, species-reliable non-target annotations); see the spec.
 
 path: data/                 # dataset root (git-ignored)
 train: images/train
@@ -9,4 +13,7 @@ val: images/val
 test: images/test
 
 names:
-  0: tree-crown
+  0: platanus
+  1: styphnolobium-japonicum
+  2: ginkgo-biloba
+  3: koelreuteria-paniculata
