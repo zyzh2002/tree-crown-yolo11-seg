@@ -109,18 +109,26 @@ def _run_training(config: dict, mode: str, **overrides) -> None:
         return
 
     model_path = config.get("model", DEFAULT_MODEL)
-    logger.info("Loading model: %s", model_path)
-    model = YOLO(model_path)
-
-    logger.info(
-        "Starting training: data=%s imgsz=%d batch=%s device=%s epochs=%d",
-        args["data"],
-        args["imgsz"],
-        args["batch"],
-        args["device"],
-        _resolve(config, overrides, "epochs", 100),
-    )
-    model.train(epochs=_resolve(config, overrides, "epochs", 100), **args)
+    resume = _resolve(config, overrides, "resume", None)
+    if resume:
+        # ultralytics: resume=True resumes from {project}/{name}/weights/last.pt;
+        # resume=<path> resumes from an explicit checkpoint.
+        ckpt = "last.pt" if resume is True else str(resume)
+        logger.info("Resuming training from checkpoint: %s", ckpt)
+        model = YOLO(ckpt)
+        model.train(epochs=_resolve(config, overrides, "epochs", 100), resume=True, **args)
+    else:
+        logger.info("Loading model: %s", model_path)
+        model = YOLO(model_path)
+        logger.info(
+            "Starting training: data=%s imgsz=%d batch=%s device=%s epochs=%d",
+            args["data"],
+            args["imgsz"],
+            args["batch"],
+            args["device"],
+            _resolve(config, overrides, "epochs", 100),
+        )
+        model.train(epochs=_resolve(config, overrides, "epochs", 100), **args)
 
     trainer = getattr(model, "trainer", None)
     if trainer is not None:
@@ -143,6 +151,14 @@ def main() -> int:
     parser.add_argument("--batch", type=int, help="Override batch size (0 for AutoBatch).")
     parser.add_argument("--device", help="Override device (e.g. 0, 'cpu').")
     parser.add_argument("--seed", type=int, help="Override random seed.")
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const=True,
+        default=None,
+        help="Resume training. Bare flag resumes from {project}/{name}/weights/last.pt; "
+        "or give a path to resume from that checkpoint.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     args = parser.parse_args()
 
@@ -159,6 +175,7 @@ def main() -> int:
                 "batch": args.batch,
                 "device": args.device,
                 "seed": args.seed,
+                "resume": args.resume,
             }.items()
             if v is not None
         }
