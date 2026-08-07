@@ -100,7 +100,7 @@ data = [
 
 ### 完整数据转换（修复前 baseline，禁止继续用于正式训练）
 - 旧 `data/oamtcd/`：4608 图 / 266643 实例 / 4608 标签，train 3492 / val 677 / test 439。
-- 后续审计确认其中包含 canopy-only 错误负样本和失真多连通 RLE；必须转换到新的 `data/oamtcd-fixed/`。
+- 后续审计确认其中包含 canopy-only 错误负样本、失真多连通 RLE 和混合灰度/RGB 图像；必须转换到新的 `data/oamtcd-rgb/`。
 
 ### batch/workers 实测结论（重要，换平台后参考）
 - **batch=4 在完整数据下验证阶段 OOM**（验证复用训练 batch 且优化器状态未释放）；**batch=2 稳定跑完 train+val**（EXIT 0，每 epoch ≈ 0.32 h）。
@@ -113,7 +113,7 @@ data = [
 
 ```text
 1. 在新平台 uv sync --extra dev --extra data
-2. 转换：python prepare_oamtcd.py --output data/oamtcd-fixed
+2. 转换：python prepare_oamtcd.py --output data/oamtcd-rgb
 3. 完整预训练：python train.py --config configs/pretrain-oamtcd.yaml
    - 新平台显存更大可尝试 batch=4/8（先跑 1 epoch 验证 val 不 OOM 再升）
 4. 产物：runs/segment/oamtcd-pretrain-fixed/weights/best.pt（仅作初始化权重，绝不 publish）
@@ -155,7 +155,7 @@ pyright train.py prepare_oamtcd.py
 .venv/bin/python train.py --config configs/default.yaml --data coco8-seg.yaml --imgsz 512 --epochs 1 --batch 2
 
 # OAM-TCD 完整转换（修复后输出必须使用新目录）
-.venv/bin/python prepare_oamtcd.py --output data/oamtcd-fixed
+.venv/bin/python prepare_oamtcd.py --output data/oamtcd-rgb
 
 # OAM-TCD 完整预训练（batch=2, workers=4, 已调优）
 .venv/bin/python train.py --config configs/pretrain-oamtcd.yaml

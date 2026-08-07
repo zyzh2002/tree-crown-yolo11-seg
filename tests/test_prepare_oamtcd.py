@@ -142,6 +142,13 @@ def _png_bytes() -> bytes:
     return encoded.tobytes()
 
 
+def _grayscale_tiff_bytes() -> bytes:
+    image = np.full((HEIGHT, WIDTH), 127, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".tif", image)
+    assert ok
+    return encoded.tobytes()
+
+
 def _make_dirs(tmp_path: Path) -> tuple[Path, Path]:
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -175,11 +182,29 @@ def test_category_2_kept_category_1_dropped(tmp_path: Path) -> None:
 def test_true_background_writes_empty_txt(tmp_path: Path) -> None:
     stats = {"instances": 0, "dropped_invalid": 0, "dropped_duplicate": 0, "decode_error": 0}
     images_dir, labels_dir = _make_dirs(tmp_path)
-    result = prepare_oamtcd.write_image_and_labels(_row("[]"), "train", images_dir, labels_dir, stats)
+    result = prepare_oamtcd.write_image_and_labels(
+        _row("[]", image=_png_bytes()), "train", images_dir, labels_dir, stats
+    )
     assert (labels_dir / "1.txt").read_text(encoding="ascii") == ""
     assert stats["instances"] == 0
     assert result.written is True
     assert result.instances == 0
+
+
+def test_grayscale_source_is_written_as_three_channel_jpeg(tmp_path: Path) -> None:
+    stats = {"instances": 0, "dropped_invalid": 0, "dropped_duplicate": 0, "decode_error": 0}
+    images_dir, labels_dir = _make_dirs(tmp_path)
+
+    result = prepare_oamtcd.write_image_and_labels(
+        _row("[]", image=_grayscale_tiff_bytes()), "train", images_dir, labels_dir, stats
+    )
+
+    image_path = next(images_dir.iterdir())
+    image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+    assert result.written is True
+    assert image_path.suffix == ".jpg"
+    assert image is not None
+    assert image.shape == (HEIGHT, WIDTH, 3)
 
 
 def test_canopy_only_row_is_not_written_as_background(tmp_path: Path) -> None:
@@ -215,7 +240,9 @@ def test_duplicate_labels_are_removed(tmp_path: Path) -> None:
     stats = {"instances": 0, "dropped_invalid": 0, "dropped_duplicate": 0, "decode_error": 0}
     images_dir, labels_dir = _make_dirs(tmp_path)
 
-    result = prepare_oamtcd.write_image_and_labels(_row(json.dumps([ann, ann])), "train", images_dir, labels_dir, stats)
+    result = prepare_oamtcd.write_image_and_labels(
+        _row(json.dumps([ann, ann]), image=_png_bytes()), "train", images_dir, labels_dir, stats
+    )
 
     assert result.instances == 1
     assert stats["dropped_duplicate"] == 1

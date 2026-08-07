@@ -48,7 +48,7 @@ data/
 
 ```bash
 # 1. 转换（下载约 3.5 GB，预留 10-20 GB 磁盘）
-.venv/bin/python prepare_oamtcd.py --output data/oamtcd-fixed
+.venv/bin/python prepare_oamtcd.py --output data/oamtcd-rgb
 
 # 2. 预训练（batch 按平台显存实测，详见下方说明）
 .venv/bin/python train.py --config configs/pretrain-oamtcd.yaml
@@ -106,8 +106,8 @@ python stage.py \
   --config configs/pretrain-oamtcd.yaml \
   --args runs/segment/oamtcd-pretrain-fixed/args.yaml \
   --results runs/segment/oamtcd-pretrain-fixed/results.csv \
-  --data data/oamtcd-fixed/data.yaml \
-  --dataset-manifest data/oamtcd-fixed/manifest.json \
+  --data data/oamtcd-rgb/data.yaml \
+  --dataset-manifest data/oamtcd-rgb/manifest.json \
   --train-commit <训练运行使用的 Git SHA>
 ```
 

@@ -4,11 +4,11 @@
 # is NEVER published via publish.py.
 #
 # Data must first be converted:
-#   python prepare_oamtcd.py --output data/oamtcd-fixed
+#   python prepare_oamtcd.py --output data/oamtcd-rgb
 #
 # Overridable via CLI flags on train.py (e.g. --imgsz 1280 --batch 2).
 
-data: data/oamtcd-fixed/data.yaml   # corrected single-class tree-crown dataset
+data: data/oamtcd-rgb/data.yaml   # corrected RGB single-class tree-crown dataset
 
 model: yolo11n-seg.pt         # official Ultralytics YOLO11-seg variant
 
@@ -51,6 +51,6 @@ plots: true
 amp: true
 
 # Output under runs/segment/ (ultralytics prepends runs/<task>/). Empty project
-# keeps the path clean: runs/segment/oamtcd-pretrain-fixed.
+# keeps the path clean: runs/segment/oamtcd-pretrain-rgb.
 project: ""
-name: oamtcd-pretrain-fixed
+name: oamtcd-pretrain-rgb

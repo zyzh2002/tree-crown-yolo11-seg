@@ -9,7 +9,7 @@ initialization for the final Xi'an model. It is never a deployable artifact and
 never used as the public ABI class list.
 
 Usage:
-    python prepare_oamtcd.py --output data/oamtcd-fixed
+    python prepare_oamtcd.py --output data/oamtcd-rgb
     python prepare_oamtcd.py --output data/oamtcd-smoke --limit 200
 """
 
@@ -242,11 +242,13 @@ def write_image_and_labels(
             stats["decode_error"] += 1
             return WriteResult(written=False, instances=0)
         stats["redacted_canopy_images"] = stats.get("redacted_canopy_images", 0) + 1
-        suffix = ".jpg"
     else:
-        suffix = _image_suffix(row, img_bytes)
+        img_bytes = _encode_rgb_jpeg(img_bytes)
+        if img_bytes is None:
+            stats["decode_error"] += 1
+            return WriteResult(written=False, instances=0)
 
-    image_path = images_dir / f"{image_id}{suffix}"
+    image_path = images_dir / f"{image_id}.jpg"
     label_path = labels_dir / f"{image_id}.txt"
     image_path.write_bytes(img_bytes)
     label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="ascii")
@@ -272,22 +274,6 @@ def _extract_image_bytes(row: dict) -> bytes | None:
     return None
 
 
-def _image_suffix(row: dict, image_bytes: bytes) -> str:
-    """Return an extension consistent with the source path or image magic."""
-    value = row.get("image")
-    if isinstance(value, dict):
-        source_path = value.get("path")
-        if isinstance(source_path, (str, Path)):
-            suffix = Path(source_path).suffix.lower()
-            if suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
-                return suffix
-    if image_bytes.startswith((b"II*\x00", b"MM\x00*")):
-        return ".tif"
-    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        return ".png"
-    return ".jpg"
-
-
 def _redact_canopy_regions(
     image_bytes: bytes,
     canopy_annotations: list[dict],
@@ -302,6 +288,17 @@ def _redact_canopy_regions(
     tree_mask = _annotation_mask(tree_annotations, width, height)
     canopy_mask[tree_mask.astype(bool)] = 0
     image[canopy_mask.astype(bool)] = 0
+    return _encode_rgb_jpeg(image)
+
+
+def _encode_rgb_jpeg(image_or_bytes: np.ndarray | bytes) -> bytes | None:
+    """Encode a source image as a three-channel JPEG for Ultralytics Mosaic."""
+    if isinstance(image_or_bytes, bytes):
+        image = cv2.imdecode(np.frombuffer(image_or_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    else:
+        image = image_or_bytes
+    if image is None:
+        return None
     ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
     return encoded.tobytes() if ok else None
 
@@ -513,7 +510,7 @@ def _load_manifest(output: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare OAM-TCD for YOLO11-seg pretraining.")
-    parser.add_argument("--output", default="data/oamtcd-fixed", help="Output directory (git-ignored).")
+    parser.add_argument("--output", default="data/oamtcd-rgb", help="Output directory (git-ignored).")
     parser.add_argument("--limit", type=int, default=None, help="Only process first N rows (smoke).")
     parser.add_argument("--skip-download", action="store_true", help="Use existing downloaded parquet.")
     parser.add_argument("--revision", default=REVISION, help="Pinned HF revision.")
