@@ -51,6 +51,6 @@ plots: true
 amp: true
 
 # Output under runs/segment/ (ultralytics prepends runs/<task>/). Empty project
-# keeps the path clean: runs/segment/oamtcd-pretrain-rgb.
+# keeps the path clean: runs/segment/oamtcd-stage1a-rgb.
 project: ""
-name: oamtcd-pretrain-rgb
+name: oamtcd-stage1a-rgb
