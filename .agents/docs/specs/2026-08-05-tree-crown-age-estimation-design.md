@@ -1,5 +1,14 @@
 # Xi'an Street Tree Species Instance Segmentation Design
 
+## Supersession Notice
+
+The 2026-08-07 platanus/other-tree strategy supersedes this document's
+four-/five-class V1 taxonomy, optional `other-tree` decision, and any annotation
+rule that permits visible trees to remain unlabeled in a supervised frame. This
+document remains authoritative only for repository boundaries, preprocessing,
+raw ONNX handling, TensorRT compatibility, immutable production releases, and
+device-side responsibilities.
+
 ## Goal
 
 Build and publish a YOLO11-seg model that detects, identifies, and delineates
@@ -350,7 +359,8 @@ opset: 17
 half precision: disabled
 ```
 
-Each HF release uploads the following immutable artifact set under a new tag:
+Each deployable HF production release uploads the following immutable artifact
+set under a new tag:
 
 ```text
 <model>.onnx
@@ -448,7 +458,13 @@ This repository does not:
 - The exported static ONNX is inspected, recorded in `model.yaml`, checksumed,
   and successfully built by the target TensorRT 8.5.2 environment.
 - No training data, labels, weights, ONNX artifacts, or TensorRT engine enters
-  Git.
+Git.
+
+Non-deployable training checkpoints are permitted in the separate private
+staging repository `zyzh0/tree-crown-yolo11-seg-staging`. A staging artifact
+uses `artifact.yaml`, must set `deployable: false`, and is never consumed by the
+onboard repository. The production repository remains restricted to immutable
+deployable ONNX releases.
 
 ## Traceability
 

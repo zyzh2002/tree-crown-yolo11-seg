@@ -5,22 +5,20 @@
 
 ## 1. 背景与目标
 
-本项目（`tree-crown-yolo11-seg`）最终目标是训练一个**西安 4 类行道树实例分割模型**：
+本项目（`tree-crown-yolo11-seg`）首个可部署目标是训练一个**西安 2 类行道树实例分割模型**：
 
 ```
 names:
   0: platanus          悬铃木
-  1: styphnolobium-japonicum  国槐
-  2: ginkgo-biloba      银杏
-  3: koelreuteria-paniculata  栾树
+  1: other-tree       已确认非悬铃木
 ```
 
-当前没有西安本地标注数据，因此先做**单类通用树冠预训练**（OAM-TCD），生成一个初始化权重，供未来西安 4 类微调使用。
+当前没有西安本地标注数据，因此先做**单类通用树冠预训练**（OAM-TCD），生成一个初始化权重，供未来西安 2 类微调使用。
 
 **关键约束（不可违反）：**
 - OAM-TCD 只用于**单类 `tree-crown` 预训练**，作为初始化权重。
-- OAM-TCD 预训练产物**绝不能**作为 4 类模型发布，**绝不能**用 `publish.py` 发布。
-- 根目录 `data.yaml` 是最终 4 类 ABI，**不能**被 OAM 单类数据覆盖。
+- OAM-TCD 预训练产物可以用 `stage.py` 上传到独立 staging 仓库，但必须保持不可部署，**绝不能**用 `publish.py` 发布。
+- 根目录 `data.yaml` 是最终 2 类 ABI，**不能**被 OAM 单类数据覆盖。
 - OAM-TCD 只用 `tree` 单树实例（COCO `category_id=2`），丢弃 `canopy` 群体（`category_id=1`）。
 
 ## 2. 当前分支与状态
@@ -100,9 +98,9 @@ data = [
 1. **uncompressed RLE**（commit `4318911`）：OAM-TCD 的 RLE 标注 `counts` 是 run-length **list**（非压缩字符串），`coco_mask.decode` 无法处理，需先过 `frPyObjects`。
 2. **project 路径冗余**（commit `771f9ff`）：ultralytics 会给 `project` 加 `runs/<task>/` 前缀，默认 `"runs"` 导致 `runs/segment/runs/...` 冗余路径。改默认 `project: ""`。
 
-### 完整数据转换（已完成，未提交——数据不进 git）
-- `data/oamtcd/`：4608 图 / 266643 实例 / 4608 标签，train 3492 / val 677 / test 439，split 无 oam_id 交叉，仅 20 个 dropped_invalid。
-- `data/oamtcd/data.yaml`（单类 tree-crown）+ `manifest.json` 已生成。
+### 完整数据转换（修复前 baseline，禁止继续用于正式训练）
+- 旧 `data/oamtcd/`：4608 图 / 266643 实例 / 4608 标签，train 3492 / val 677 / test 439。
+- 后续审计确认其中包含 canopy-only 错误负样本和失真多连通 RLE；必须转换到新的 `data/oamtcd-fixed/`。
 
 ### batch/workers 实测结论（重要，换平台后参考）
 - **batch=4 在完整数据下验证阶段 OOM**（验证复用训练 batch 且优化器状态未释放）；**batch=2 稳定跑完 train+val**（EXIT 0，每 epoch ≈ 0.32 h）。
@@ -115,10 +113,10 @@ data = [
 
 ```text
 1. 在新平台 uv sync --extra dev --extra data
-2. 转换：python prepare_oamtcd.py --output data/oamtcd   （或复用已转换的 data/oamtcd）
-3. 完整预训练：python train.py --config configs/pretrain-oamtcd.yaml  （batch=2, workers=4）
+2. 转换：python prepare_oamtcd.py --output data/oamtcd-fixed
+3. 完整预训练：python train.py --config configs/pretrain-oamtcd.yaml
    - 新平台显存更大可尝试 batch=4/8（先跑 1 epoch 验证 val 不 OOM 再升）
-4. 产物：runs/segment/oamtcd-pretrain/weights/best.pt（仅作初始化权重，绝不 publish）
+4. 产物：runs/segment/oamtcd-pretrain-fixed/weights/best.pt（仅作初始化权重，绝不 publish）
 ```
 
 ## 5. 硬件 / 环境约束
@@ -132,12 +130,12 @@ data = [
 ## 6. 关键代码位置
 
 - `train.py`：训练/验证入口（已加固）。
-- `prepare_oamtcd.py`：OAM-TCD 转换（**有 split bug 待修**）。
+- `prepare_oamtcd.py`：OAM-TCD 转换。
 - `pyproject.toml`：依赖 + `data` 可选组。
 - `pyrightconfig.json`：pyright → `.venv`。
 - `tests/test_train.py`：train.py 测试（9 passed）。
 - `tests/test_publish_checksums.py`：既有测试（publish 校验）。
-- 根 `data.yaml`：最终 4 类 ABI（勿动）。
+- 根 `data.yaml`：最终 2 类 ABI。
 - `.agents/docs/specs/`、`.agents/docs/plans/`：spec 与计划。
 
 ## 7. 常用命令
@@ -156,8 +154,8 @@ pyright train.py prepare_oamtcd.py
 # 训练 smoke（coco8-seg）
 .venv/bin/python train.py --config configs/default.yaml --data coco8-seg.yaml --imgsz 512 --epochs 1 --batch 2
 
-# OAM-TCD 完整转换（复用已下载的 raw 用 --skip-download）
-.venv/bin/python prepare_oamtcd.py --output data/oamtcd --skip-download
+# OAM-TCD 完整转换（修复后输出必须使用新目录）
+.venv/bin/python prepare_oamtcd.py --output data/oamtcd-fixed
 
 # OAM-TCD 完整预训练（batch=2, workers=4, 已调优）
 .venv/bin/python train.py --config configs/pretrain-oamtcd.yaml
@@ -182,7 +180,7 @@ docs: document OAM-TCD pretraining workflow and reject geotree
 - ⚠️ **batch=4 在完整数据验证阶段 OOM**（batch=2 稳定）。换更大显存平台后再试 batch 4/8，需先跑 1 epoch 确认验证不 OOM。
 - ⚠️ **AMP 已开启**，非瓶颈；若换平台后想进一步提速可对比 `amp: false`，但一般不推荐。
 - ⚠️ **根 `data.yaml` 与 OAM 单类 `data.yaml` 是两份不同文件**，切勿混淆。
-- ⚠️ **OAM-TCD 预训练产物绝不能 publish**（仅作 4 类模型的初始化权重）。
+- ⚠️ **OAM-TCD 预训练产物绝不能 publish**（仅作 2 类模型的初始化权重）；可用 `stage.py` 暂存。
 - ⚠️ **`data/oamtcd/` 不进 git**，换平台后需重新转换或迁移原始 parquet。
 
 ## 10. 新平台实测更新（V100 8 卡服务器，2026-08-06）
@@ -229,14 +227,15 @@ epochs: 50
 - 正式训练进程以 `setsid nohup ... > .local/oamtcd-pretrain.log 2>&1 < /dev/null &` 后台运行。
 - 进度查看：`tail -2 runs/segment/oamtcd-pretrain-*/results.csv`（每行 = 1 个 epoch）。
 
-### 10.5 实测性能与效果
+### 10.5 实测性能与效果（修复前 baseline）
 
 - 双卡每 epoch ≈ 0.048 h（约 2.9 分钟），50 epoch 约 2.4 小时。
-- 训练至 epoch 31：box_loss 2.90→2.35、seg_loss 2.66→1.56，mask mAP50-95 0.32→0.50，持续收敛。
-- 尚未看到平台期，50 epoch 设置合理；若指标仍升可 `--resume` 续训。
+- 训练至 epoch 31：box loss 1.90→1.62、seg loss 2.90→2.35、mask mAP50 0.32→0.50、mask mAP50-95 0.13→0.24。
+- 完整 50 epoch 后 `best.pt` 重验证约为 box mAP50-95 0.305、mask mAP50-95 0.266。
+- 该运行的数据转换后来发现 canopy-only 错误负样本和多连通 RLE 失真，因此只能作为修复前 baseline；修复后的 Stage 1a 必须重新转换并从官方权重重新训练。
 
 ### 10.6 交接状态
 
 - **未提交改动**（待训练完成后确认/提交）：`pyproject.toml`、`uv.lock`、`.python-version`、
   `configs/pretrain-oamtcd.yaml`、`docs/getting-started.md`、本文件。
-- 训练完成后下一步：验收 `best.pt`/`last.pt`/`results.csv`，然后进入四类微调或按需导出。
+- 下一步：使用修复后的转换器生成新数据目录，完成 smoke 后重新训练 Stage 1a，再进入两类微调。

@@ -1,23 +1,45 @@
 # 发布流程
 
-本文介绍如何把训练好的模型发布到 Hugging Face 私有模型仓库，以及机载仓库如何消费该产物。
+本文介绍如何暂存训练 checkpoint、如何正式发布可部署模型，以及机载仓库如何消费生产产物。
 
 ## 作用
 
 本仓库是产物"生产者"，机载仓库（`manifold-3-vision-detect`）是"消费者"。两者唯一的交接点是
-**HF 私有模型仓库**。本仓库发布 ONNX + `model.yaml`，机载侧的 `fetch_model.sh` 拉取后由
+**HF 私有生产模型仓库**。本仓库发布 ONNX + `model.yaml`，机载侧的 `fetch_model.sh` 拉取后由
 `trtexec` 在设备端构建 `.engine`。
+
+实验 checkpoint 使用另一个私有仓库 `zyzh0/tree-crown-yolo11-seg-staging`。该仓库不属于机载
+交接点，所有产物都设置 `deployable: false`。
+
+## 暂存
+
+```bash
+python stage.py --tag exp-stage1a-oamtcd-y11n-r1 --stage stage1a \
+  --architecture yolo11n-seg --checkpoint <best.pt> --config <config.yaml> \
+  --args <args.yaml> --results <results.csv> --data <data.yaml> \
+  --dataset-manifest <manifest.json> --train-commit <training-git-sha>
+```
+
+- `experimental` 生命周期使用 `exp-*` tag，适用于 Stage 1a/1b 初始化权重。
+- `candidate` 生命周期使用 `cand-*` tag，适用于尚未通过正式发布门槛的 Stage 2 模型。
+- 暂存包包含 `model.pt`、`artifact.yaml`、训练配置、resolved args、指标、数据 manifest 和
+  `SHA256SUMS`。
+- 暂存包不生成生产 `model.yaml`，不能被机载侧安装。
+- 暂存 metadata 不声明恢复能力；是否可恢复必须由训练框架实际检查 checkpoint 状态。
 
 ## 发布
 
 ```bash
-python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
+python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt --train-commit <训练运行 Git SHA>
 ```
 
 - **默认走 token**：`huggingface_hub` 上传，`HF_TOKEN` 从 `.local/credentials.env`（权限 600，git 忽略）读取。
 - 可用 `--token <HF_TOKEN>` 或 `--env <文件>` 覆盖凭据来源。
 - SSH 方式可选：`--ssh`（`git push` 到 `git@hf.co`），需要 `git-lfs`（安装后先执行一次 `git lfs install`）。
 - `--tag` 为版本号（如 `v1.0.0`），写入 `model.yaml` 的 `version` 字段。
+- 正式发布只接受 `vX.Y.Z` tag，并只接受 `[platanus, other-tree]` 两类 ABI。
+- `--train-commit` 必须是训练运行实际使用的完整 40 位 Git SHA。
+- 生产仓库固定为 `zyzh0/tree-crown-yolo11-seg`，命令行不能改写到其他仓库。
 - 发布产物含：ONNX 权重 + `model.yaml`（模型 ABI 契约）+ `SHA256SUMS`（校验清单）。
   每次发布是**一个原子提交 + 一个不可移动 tag**，三个文件同属该 tag 指向的提交。
 
@@ -40,6 +62,8 @@ outputs: { name: "...", dtype: "...", shape: [...] }   # 按真实导出填写
 classes: [ ... ]          # 与 data.yaml 完全一致
 train_commit: "<git sha>" # 可回溯到训练配置
 target_trt: "8.5.2"       # 目标机 TensorRT 版本
+lifecycle: release
+deployable: true
 ```
 
 - `classes` 必须与 `data.yaml` 完全一致。

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
+from unittest import mock
 
+import cv2
 import numpy as np
 import polars as pl
 import pytest
@@ -26,23 +28,21 @@ def test_single_polygon_normalization() -> None:
     assert coords == [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
 
 
-def test_multi_polygon_merge() -> None:
+def test_disconnected_multi_polygon_is_dropped() -> None:
     seg = [
         [0, 0, 20, 0, 20, 20, 0, 20],
         [80, 80, 100, 80, 100, 100, 80, 100],
     ]
     coords = prepare_oamtcd.segmentation_to_yolo(seg, WIDTH, HEIGHT)
-    assert coords is not None
-    assert len(coords) % 2 == 0
-    assert len(coords) >= 6
-    assert all(0.0 <= v <= 1.0 for v in coords)
+    assert coords is None
 
 
 def test_rle_decode_contour_normalization() -> None:
     binary = np.zeros((10, 10), dtype=np.uint8)
     binary[2:8, 2:8] = 1
     rle = coco_mask.encode(np.asfortranarray(binary))
-    rle = {"counts": rle["counts"].decode("utf-8"), "size": [10, 10]}
+    counts = rle["counts"]
+    rle = {"counts": counts.decode("utf-8") if isinstance(counts, bytes) else counts, "size": [10, 10]}
     coords = prepare_oamtcd.segmentation_to_yolo(rle, 10, 10)
     assert coords is not None
     assert len(coords) % 2 == 0
@@ -70,6 +70,19 @@ def test_uncompressed_rle_decode() -> None:
     assert len(coords) % 2 == 0
     assert len(coords) >= 6
     assert all(0.0 <= v <= 1.0 for v in coords)
+
+
+def test_disconnected_rle_is_dropped_instead_of_bridged() -> None:
+    binary = np.zeros((20, 20), dtype=np.uint8)
+    binary[2:7, 2:7] = 1
+    binary[13:18, 13:18] = 1
+    rle = coco_mask.encode(np.asfortranarray(binary))
+    counts = rle["counts"]
+    rle = {"counts": counts.decode("utf-8") if isinstance(counts, bytes) else counts, "size": [20, 20]}
+
+    coords = prepare_oamtcd.segmentation_to_yolo(rle, 20, 20)
+
+    assert coords is None
 
 
 def test_less_than_three_points_dropped() -> None:
@@ -112,7 +125,7 @@ def test_annotations_keeps_only_dicts_with_segmentation() -> None:
 # --- write_image_and_labels ---
 
 
-def _row(coco_annotations: str, image: bytes = b"fakejpeg") -> dict:
+def _row(coco_annotations: str, image: bytes | None = b"fakejpeg") -> dict:
     return {
         "image_id": 1,
         "width": WIDTH,
@@ -120,6 +133,13 @@ def _row(coco_annotations: str, image: bytes = b"fakejpeg") -> dict:
         "image": image,
         "coco_annotations": coco_annotations,
     }
+
+
+def _png_bytes() -> bytes:
+    image = np.full((HEIGHT, WIDTH, 3), 255, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    return encoded.tobytes()
 
 
 def _make_dirs(tmp_path: Path) -> tuple[Path, Path]:
@@ -132,33 +152,74 @@ def _make_dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_category_2_kept_category_1_dropped(tmp_path: Path) -> None:
     anns = [
-        {"category_id": 1, "segmentation": [[0, 0, 100, 0, 100, 100, 0, 100]]},
-        {"category_id": 2, "segmentation": [[0, 0, 100, 0, 100, 100, 0, 100]]},
+        {"category_id": 1, "segmentation": [[0, 0, 70, 0, 70, 70, 0, 70]]},
+        {"category_id": 2, "segmentation": [[60, 60, 100, 60, 100, 100, 60, 100]]},
     ]
-    stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0}
+    stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0, "redacted_canopy_images": 0}
     images_dir, labels_dir = _make_dirs(tmp_path)
-    prepare_oamtcd.write_image_and_labels(_row(json.dumps(anns)), "train", images_dir, labels_dir, stats)
+    prepare_oamtcd.write_image_and_labels(
+        _row(json.dumps(anns), image=_png_bytes()), "train", images_dir, labels_dir, stats
+    )
     lines = (labels_dir / "1.txt").read_text(encoding="ascii").splitlines()
     assert len(lines) == 1
     assert lines[0].startswith("0 ")  # single class id 0
     assert stats["instances"] == 1
+    output_image = cv2.imread(str(next(images_dir.iterdir())))
+    assert output_image is not None
+    assert np.all(output_image[20, 20] < 10)
+    assert np.all(output_image[65, 65] > 245)
+    assert np.all(output_image[80, 80] > 245)
+    assert stats["redacted_canopy_images"] == 1
 
 
-def test_empty_labels_write_empty_txt(tmp_path: Path) -> None:
-    stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0}
+def test_true_background_writes_empty_txt(tmp_path: Path) -> None:
+    stats = {"instances": 0, "dropped_invalid": 0, "dropped_duplicate": 0, "decode_error": 0}
     images_dir, labels_dir = _make_dirs(tmp_path)
-    prepare_oamtcd.write_image_and_labels(_row("[]"), "train", images_dir, labels_dir, stats)
+    result = prepare_oamtcd.write_image_and_labels(_row("[]"), "train", images_dir, labels_dir, stats)
     assert (labels_dir / "1.txt").read_text(encoding="ascii") == ""
     assert stats["instances"] == 0
+    assert result.written is True
+    assert result.instances == 0
+
+
+def test_canopy_only_row_is_not_written_as_background(tmp_path: Path) -> None:
+    anns = [{"category_id": 1, "segmentation": [[0, 0, 100, 0, 100, 100, 0, 100]]}]
+    stats = {
+        "instances": 0,
+        "dropped_invalid": 0,
+        "dropped_duplicate": 0,
+        "dropped_canopy_only_images": 0,
+        "decode_error": 0,
+    }
+    images_dir, labels_dir = _make_dirs(tmp_path)
+
+    result = prepare_oamtcd.write_image_and_labels(_row(json.dumps(anns)), "train", images_dir, labels_dir, stats)
+
+    assert result.written is False
+    assert not list(images_dir.iterdir())
+    assert not list(labels_dir.iterdir())
+    assert stats["dropped_canopy_only_images"] == 1
 
 
 def test_decode_error_returns_zero(tmp_path: Path) -> None:
-    stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0}
+    stats = {"instances": 0, "dropped_invalid": 0, "dropped_duplicate": 0, "decode_error": 0}
     images_dir, labels_dir = _make_dirs(tmp_path)
     row = _row("[]", image=None)  # undecodable image
-    kept = prepare_oamtcd.write_image_and_labels(row, "train", images_dir, labels_dir, stats)
-    assert kept == 0
+    result = prepare_oamtcd.write_image_and_labels(row, "train", images_dir, labels_dir, stats)
+    assert result.written is False
     assert stats["decode_error"] == 1
+
+
+def test_duplicate_labels_are_removed(tmp_path: Path) -> None:
+    ann = {"category_id": 2, "segmentation": [[0, 0, 100, 0, 100, 100, 0, 100]]}
+    stats = {"instances": 0, "dropped_invalid": 0, "dropped_duplicate": 0, "decode_error": 0}
+    images_dir, labels_dir = _make_dirs(tmp_path)
+
+    result = prepare_oamtcd.write_image_and_labels(_row(json.dumps([ann, ann])), "train", images_dir, labels_dir, stats)
+
+    assert result.instances == 1
+    assert stats["dropped_duplicate"] == 1
+    assert len((labels_dir / "1.txt").read_text(encoding="ascii").splitlines()) == 1
 
 
 # --- split assignment ---
@@ -199,6 +260,12 @@ def test_no_oam_id_appears_in_multiple_splits() -> None:
     assert by_split["val"].isdisjoint(by_split["test"])
 
 
+def test_split_validation_rejects_cross_split_oam_id() -> None:
+    oam_split = {"train": {"shared"}, "val": {"shared"}, "test": set()}
+    with pytest.raises(ValueError, match="shared"):
+        prepare_oamtcd._validate_oam_splits(oam_split)
+
+
 # --- manifest & data.yaml ---
 
 
@@ -208,9 +275,19 @@ def test_manifest_fields_complete(tmp_path: Path) -> None:
     split_counts = {"train": 1, "val": 0, "test": 1}
     split_instances = {"train": 2, "val": 0, "test": 1}
     oam_split = {"train": {"a"}, "val": set(), "test": {"b"}}
-    prepare_oamtcd._write_manifest(tmp_path, df, stats, split_counts, split_instances, oam_split, None)
+    prepare_oamtcd._write_manifest(
+        tmp_path,
+        df,
+        stats,
+        split_counts,
+        split_instances,
+        oam_split,
+        None,
+        revision="test-revision",
+    )
     manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["source"]["repo_id"] == prepare_oamtcd.REPO_ID
+    assert manifest["source"]["revision"] == "test-revision"
     assert manifest["class_map"] == {"tree-crown": 0}
     assert manifest["keep_category_ids"] == [2]
     assert manifest["drop_category_ids"] == [1]
@@ -229,6 +306,60 @@ def test_data_yaml_single_class(tmp_path: Path) -> None:
     assert "names:" in content
     assert "  0: tree-crown" in content
     assert "1:" not in content
+    assert "path:" not in content
+
+
+def test_prepare_forwards_revision_to_download(tmp_path: Path) -> None:
+    frame = pl.DataFrame(
+        {
+            "image_id": [1],
+            "width": [100],
+            "height": [100],
+            "image": [b"image"],
+            "coco_annotations": ["[]"],
+            "validation_fold": [0],
+            "oam_id": ["a"],
+            "_is_test": [False],
+        }
+    )
+    raw = tmp_path / "raw-source"
+    with (
+        mock.patch.object(prepare_oamtcd, "download_raw", return_value=raw) as download,
+        mock.patch.object(prepare_oamtcd, "load_frame", return_value=frame),
+    ):
+        manifest = prepare_oamtcd.prepare(tmp_path / "out", revision="custom-revision")
+
+    download.assert_called_once_with(tmp_path / "out", "custom-revision")
+    assert manifest["source"]["revision"] == "custom-revision"
+
+
+def test_download_raw_removes_stale_shards_before_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    output = tmp_path / "out"
+    stale = output / "raw" / "data" / "stale.parquet"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"stale")
+
+    def fake_snapshot_download(**kwargs) -> None:
+        data_dir = Path(kwargs["local_dir"]) / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "train-00000.parquet").write_bytes(b"new")
+
+    monkeypatch.setattr(prepare_oamtcd, "snapshot_download", fake_snapshot_download)
+    prepare_oamtcd.download_raw(output, revision="new-revision")
+
+    assert not stale.exists()
+    source = json.loads((output / "raw" / "source.json").read_text(encoding="utf-8"))
+    assert source["revision"] == "new-revision"
+    assert [item["path"] for item in source["files"]] == ["data/train-00000.parquet"]
+
+
+def test_prepare_refuses_existing_generated_output(tmp_path: Path) -> None:
+    output = tmp_path / "out"
+    (output / "images" / "train").mkdir(parents=True)
+    (output / "images" / "train" / "stale.jpg").write_bytes(b"stale")
+
+    with pytest.raises(FileExistsError, match="new output directory"):
+        prepare_oamtcd.prepare(output, skip_download=True)
 
 
 def test_polygon_area_positive() -> None:

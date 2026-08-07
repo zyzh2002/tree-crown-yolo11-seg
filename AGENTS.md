@@ -18,11 +18,14 @@ repo**: this repo produces ONNX + `model.yaml`, the onboard repo pulls them via
 ## Workflow Boundary (must follow)
 
 ```
-training data -> train/validate -> export ONNX -> publish to HF private repo
+training data -> train/validate -> optional staging backup -> export ONNX -> publish to HF private repo
     -> onboard fetch_model.sh pulls -> trtexec builds .engine
 ```
 
 - This repo's endpoint is the **HF private repo**. It never deploys to a device.
+- Non-deployable checkpoints may be uploaded to the separate private staging
+  repo `zyzh0/tree-crown-yolo11-seg-staging` with `stage.py`. Staging artifacts
+  must use `deployable: false` and must never be consumed onboard.
 - **Datasets never enter git.** `/data` is git-ignored (or managed with DVC).
 - **ONNX weights never enter git.** Final artifacts are uploaded by `publish.py`
   to HF; never committed to the repo.
@@ -88,10 +91,22 @@ python export.py --weights runs/segment/train/weights/best.pt --imgsz 1280
 ### Publish to HF
 
 ```bash
-python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
+python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt --train-commit <git-sha>
 # Token (default): reads HF_TOKEN from .local/credentials.env.
-# SSH alternative: python publish.py --tag v1.0.0 --weights <onnx> --ssh
+# SSH alternative: python publish.py --tag v1.0.0 --weights <onnx> --train-commit <git-sha> --ssh
 ```
+
+### Stage a checkpoint
+
+```bash
+python stage.py --tag exp-stage1a-oamtcd-y11n-r1 --stage stage1a \
+  --architecture yolo11n-seg --checkpoint <best.pt> --config <config.yaml> \
+  --args <args.yaml> --results <results.csv> --data <data.yaml> \
+  --dataset-manifest <manifest.json> --train-commit <training-git-sha>
+```
+
+- Staging is checkpoint storage, not deployment publication.
+- Only `publish.py` may create a deployable `vX.Y.Z` production artifact.
 
 ### Lint
 

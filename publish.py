@@ -10,10 +10,8 @@ already maps *.onnx to LFS). The token path handles LFS automatically; the SSH
 path requires git-lfs installed and 'git lfs install' run once.
 
 Usage:
-    python publish.py --tag v1.0.0 --weights runs/segment/train/weights/best.pt
-    python publish.py --tag v1.0.0 --origin <path-to-onnx>  # publish an existing ONNX
-    python publish.py --tag v1.0.0 --weights <onnx> --token <token>  # explicit token
-    python publish.py --tag v1.0.0 --weights <onnx> --ssh          # SSH auth
+    python publish.py --tag v1.0.0 --weights <best.pt> --train-commit <git-sha>
+    python publish.py --tag v1.0.0 --origin <model.onnx> --train-commit <git-sha>
 """
 
 from __future__ import annotations
@@ -21,12 +19,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 logger = logging.getLogger("tree-crown.publish")
@@ -36,6 +37,16 @@ DEFAULT_TARGET_TRT = "8.5.2"
 DEFAULT_HF_REPO = "zyzh0/tree-crown-yolo11-seg"
 DEFAULT_HF_SSH = "git@hf.co:zyzh0/tree-crown-yolo11-seg"
 DEFAULT_CREDENTIALS = ".local/credentials.env"
+RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+GIT_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+RELEASE_CLASSES = ["platanus", "other-tree"]
+
+
+@dataclass(frozen=True)
+class ReleaseBundle:
+    onnx: Path
+    model_yaml: Path
+    checksums: Path
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -75,14 +86,6 @@ def _run_git(args: list[str], cwd: Path | None = None) -> str:
     return proc.stdout.strip()
 
 
-def _git_commit() -> str:
-    try:
-        return _run_git(["rev-parse", "HEAD"])
-    except subprocess.CalledProcessError:
-        logger.warning("Could not determine git HEAD; using 'unknown'.")
-        return "unknown"
-
-
 def _load_classes(data_yaml: str) -> list[str]:
     if not Path(data_yaml).exists():
         raise FileNotFoundError(f"data.yaml not found: {data_yaml}")
@@ -96,17 +99,20 @@ def _load_classes(data_yaml: str) -> list[str]:
 
 def _inspect_onnx(onnx_path: Path) -> dict:
     import onnx
+    from onnx import helper
 
     model = onnx.load(str(onnx_path))
     graph = model.graph
     inputs = []
     for inp in graph.input:
         dims = [d.dim_value if d.HasField("dim_value") else d.dim_param for d in inp.type.tensor_type.shape.dim]
-        inputs.append({"name": inp.name, "dtype": "float32", "shape": dims})
+        dtype = np.dtype(helper.tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type)).name
+        inputs.append({"name": inp.name, "dtype": dtype, "shape": dims})
     outputs = []
     for out in graph.output:
         dims = [d.dim_value if d.HasField("dim_value") else d.dim_param for d in out.type.tensor_type.shape.dim]
-        outputs.append({"name": out.name, "dtype": "float32", "shape": dims})
+        dtype = np.dtype(helper.tensor_dtype_to_np_dtype(out.type.tensor_type.elem_type)).name
+        outputs.append({"name": out.name, "dtype": dtype, "shape": dims})
     return {"inputs": inputs, "outputs": outputs}
 
 
@@ -134,15 +140,65 @@ def _write_checksums(onnx: Path, model_yaml: Path, output: Path) -> None:
 
 def _build_meta(tag: str, classes: list[str], train_commit: str, onnx_path: Path, target_trt: str) -> dict:
     info = _inspect_onnx(onnx_path)
+    expected_input = {"name": "images", "dtype": "float32", "shape": [1, 3, 1280, 1280]}
+    if info["inputs"] != [expected_input]:
+        raise ValueError(f"ONNX does not match fixed input contract: expected {expected_input!r}")
+    if len(info["outputs"]) != 2 or any(output["dtype"] != "float32" for output in info["outputs"]):
+        raise ValueError("YOLO11-seg ONNX must expose exactly two float32 outputs")
+    if not any(output["shape"] == [1, 38, 33600] for output in info["outputs"]):
+        raise ValueError("Two-class YOLO11-seg detection output must contain 38 channels")
+    if not any(output["shape"] == [1, 32, 320, 320] for output in info["outputs"]):
+        raise ValueError("YOLO11-seg ONNX must expose the [1, 32, 320, 320] mask prototype output")
     return {
         "model_name": MODEL_NAME,
         "version": tag,
+        "lifecycle": "release",
+        "deployable": True,
         "input": info["inputs"][0],
         "outputs": info["outputs"],
         "classes": classes,
         "train_commit": train_commit,
         "target_trt": target_trt,
     }
+
+
+def _validate_release(tag: str, classes: list[str]) -> None:
+    """Enforce the production ABI and keep experimental artifacts in staging."""
+    if not RELEASE_TAG.fullmatch(tag):
+        raise ValueError("Production tag must use vMAJOR.MINOR.PATCH format")
+    if len(classes) != 2:
+        raise ValueError("The first deployable release must contain exactly two classes")
+    if classes != RELEASE_CLASSES:
+        raise ValueError(f"Production classes must be ordered as {RELEASE_CLASSES!r}")
+
+
+def _validate_train_commit(train_commit: str) -> None:
+    if not GIT_SHA.fullmatch(train_commit):
+        raise ValueError("train_commit must be a full 40-character Git SHA")
+
+
+def _validate_production_repo(hf_repo: str, hf_ssh: str) -> None:
+    if hf_repo != DEFAULT_HF_REPO or hf_ssh != DEFAULT_HF_SSH:
+        raise ValueError("Production releases must use the configured production Hugging Face repository")
+
+
+def _build_release_bundle(
+    source_onnx: Path,
+    tag: str,
+    classes: list[str],
+    train_commit: str,
+    target_trt: str,
+    bundle_dir: Path,
+) -> ReleaseBundle:
+    """Create the fixed-name production bundle consumed by the onboard repo."""
+    bundle_dir.mkdir(parents=True, exist_ok=False)
+    onnx = bundle_dir / "model.onnx"
+    shutil.copy2(source_onnx, onnx)
+    model_yaml = bundle_dir / "model.yaml"
+    _write_model_yaml(_build_meta(tag, classes, train_commit, onnx, target_trt), model_yaml)
+    checksums = bundle_dir / "SHA256SUMS"
+    _write_checksums(onnx, model_yaml, checksums)
+    return ReleaseBundle(onnx=onnx, model_yaml=model_yaml, checksums=checksums)
 
 
 def _publish_ssh(
@@ -235,6 +291,7 @@ def main() -> int:
     parser.add_argument("--hf-repo", default=DEFAULT_HF_REPO, help="HF private repo id (token path).")
     parser.add_argument("--hf-ssh", default=DEFAULT_HF_SSH, help="HF SSH URL (SSH path).")
     parser.add_argument("--target-trt", default=DEFAULT_TARGET_TRT, help="Onboard TensorRT baseline version.")
+    parser.add_argument("--train-commit", required=True, help="Git commit used by the released training run.")
     parser.add_argument("--token", help="HF_TOKEN. Overrides token from --env.")
     parser.add_argument(
         "--env", default=DEFAULT_CREDENTIALS, help="File with HF_TOKEN (default: .local/credentials.env)."
@@ -245,26 +302,32 @@ def main() -> int:
 
     _setup_logging(args.verbose)
     try:
+        _validate_production_repo(args.hf_repo, args.hf_ssh)
         onnx = _resolve_onnx(args.origin or args.weights)
         if not onnx.exists():
             raise FileNotFoundError(f"ONNX not found: {onnx}")
         classes = _load_classes(args.data)
-        train_commit = _git_commit()
-        meta = _build_meta(args.tag, classes, train_commit, onnx, args.target_trt)
-        model_yaml = onnx.parent / "model.yaml"
-        _write_model_yaml(meta, model_yaml)
-        checksums = onnx.parent / "SHA256SUMS"
-        _write_checksums(onnx, model_yaml, checksums)
+        _validate_release(args.tag, classes)
+        _validate_train_commit(args.train_commit)
+        train_commit = args.train_commit
+        with tempfile.TemporaryDirectory(prefix="tree-crown-release-") as tmp:
+            bundle = _build_release_bundle(
+                onnx,
+                args.tag,
+                classes,
+                train_commit,
+                args.target_trt,
+                Path(tmp) / args.tag,
+            )
+            logger.info("Publishing to HF (tag %s): %s", args.tag, bundle.onnx.name)
+            logger.info("Classes: %s", classes)
+            logger.info("train_commit: %s", train_commit)
 
-        logger.info("Publishing to HF (tag %s): %s", args.tag, onnx.name)
-        logger.info("Classes: %s", classes)
-        logger.info("train_commit: %s", train_commit)
-
-        if args.ssh:
-            _publish_ssh(onnx, model_yaml, checksums, args.hf_ssh, args.tag)
-        else:
-            token = args.token or _load_token_from_env(args.env)
-            _publish_token(onnx, model_yaml, checksums, args.hf_repo, args.tag, token)
+            if args.ssh:
+                _publish_ssh(bundle.onnx, bundle.model_yaml, bundle.checksums, args.hf_ssh, args.tag)
+            else:
+                token = args.token or _load_token_from_env(args.env)
+                _publish_token(bundle.onnx, bundle.model_yaml, bundle.checksums, args.hf_repo, args.tag, token)
         return 0
     except Exception as exc:  # noqa: BLE001 - top-level error funnel
         logger.error("Publish failed: %s", exc)

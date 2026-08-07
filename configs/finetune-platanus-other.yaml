@@ -1,0 +1,43 @@
+# Xi'an platanus/other-tree transfer-learning baseline.
+# The dataset must pass the exhaustive annotation gate in the 2026-08-07 spec.
+
+data: data.yaml
+model: runs/segment/oamtcd-pretrain-fixed/weights/best.pt
+task: segment
+
+imgsz: 1280
+epochs: 80
+batch: 2
+device: 0
+workers: 4
+
+seed: 0
+deterministic: true
+single_cls: false
+
+optimizer: AdamW
+lr0: 0.0005
+lrf: 0.01
+cos_lr: true
+warmup_epochs: 2
+freeze: null
+weight_decay: 0.0005
+
+mosaic: 0.5
+close_mosaic: 15
+degrees: 45.0
+flipud: 0.5
+fliplr: 0.5
+hsv_h: 0.015
+hsv_s: 0.4
+hsv_v: 0.3
+scale: 0.3
+translate: 0.1
+
+max_det: 300
+patience: 20
+cache: false
+plots: true
+amp: true
+project: ""
+name: platanus-other-y11n

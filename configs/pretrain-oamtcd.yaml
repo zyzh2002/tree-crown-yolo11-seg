@@ -1,13 +1,14 @@
 # OAM-TCD single-class tree-crown pretraining configuration.
-# Produces a weight-initialization checkpoint for the final Xi'an 4-species
-# model. The output is NEVER published via publish.py.
+# Produces a weight-initialization checkpoint for the final Xi'an two-class
+# model. The output may be backed up with stage.py but is NEVER deployable and
+# is NEVER published via publish.py.
 #
 # Data must first be converted:
-#   python prepare_oamtcd.py --output data/oamtcd
+#   python prepare_oamtcd.py --output data/oamtcd-fixed
 #
 # Overridable via CLI flags on train.py (e.g. --imgsz 1280 --batch 2).
 
-data: data/oamtcd/data.yaml   # single-class tree-crown dataset (converted)
+data: data/oamtcd-fixed/data.yaml   # corrected single-class tree-crown dataset
 
 model: yolo11n-seg.pt         # official Ultralytics YOLO11-seg variant
 
@@ -19,14 +20,13 @@ imgsz: 1280
 epochs: 50
 # OAM-TCD has very high instance density (up to 870 instances/image, 18% of
 # images >100). Segmentation mask memory scales with the number of instances in
-# a batch. DDP on idle GPUs 4/5 validated with batch=4 (2/rank train, 4/rank
-# val) with no OOM; on busy GPUs (0/1, other users) DDP appeared to hang but
-# was just rank-sync slowdown from shared-GPU contention.
-batch: 4
+# a batch. Start with the portable single-GPU baseline and override only after
+# a one-epoch train+validation capacity check on the target platform.
+batch: 2
 
-# Training devices: two idle V100 GPUs on the same NUMA node (NODE link).
-# Do NOT use GPUs 0/1 when other users' jobs are running on them.
-device: "4,5"
+# Portable default. The known V100 server may override with --device 4,5
+# --batch 4 when both GPUs are idle and on the same NUMA node.
+device: 0
 
 # System RAM is 62 GiB (192 cores). workers 4 balances dataloader throughput
 # against the prefetch_factor=4 memory each of the 8 total workers holds.
@@ -39,6 +39,11 @@ deterministic: true
 # OAM-TCD is a single generic class; single_cls keeps the loss single-class.
 single_cls: true
 
+# OAM-TCD contains up to hundreds of crowns per image. Keep validation above
+# the observed dataset maximum so recall/AP are not truncated at the default
+# max_det=300.
+max_det: 1000
+
 # Keep the run on disk / avoid caching the large dataset in RAM.
 patience: 20
 cache: false
@@ -46,6 +51,6 @@ plots: true
 amp: true
 
 # Output under runs/segment/ (ultralytics prepends runs/<task>/). Empty project
-# keeps the path clean: runs/segment/oamtcd-pretrain.
+# keeps the path clean: runs/segment/oamtcd-pretrain-fixed.
 project: ""
-name: oamtcd-pretrain
+name: oamtcd-pretrain-fixed

@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from publish import _sha256, _write_checksums
+from publish import (
+    _build_meta,
+    _build_release_bundle,
+    _sha256,
+    _validate_production_repo,
+    _validate_release,
+    _validate_train_commit,
+    _write_checksums,
+)
 
 
 @pytest.fixture()
@@ -73,3 +81,135 @@ def test_byte_change_fails_verification(release_files: tuple[Path, Path, Path]) 
         text=True,
     )
     assert result.returncode != 0
+
+
+def test_release_requires_semver_tag() -> None:
+    with pytest.raises(ValueError, match="vMAJOR.MINOR.PATCH"):
+        _validate_release("exp-stage1a-oamtcd-y11n-r1", ["tree-crown"])
+
+
+def test_release_rejects_single_class_pretraining_abi() -> None:
+    with pytest.raises(ValueError, match="exactly two classes"):
+        _validate_release("v1.0.0", ["tree-crown"])
+
+
+def test_release_requires_platanus_other_tree_class_order() -> None:
+    with pytest.raises(ValueError, match="platanus.*other-tree"):
+        _validate_release("v1.0.0", ["other-tree", "platanus"])
+
+
+def test_release_metadata_is_explicitly_deployable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "publish._inspect_onnx",
+        lambda _: {
+            "inputs": [{"name": "images", "dtype": "float32", "shape": [1, 3, 1280, 1280]}],
+            "outputs": [
+                {"name": "output0", "dtype": "float32", "shape": [1, 38, 33600]},
+                {"name": "output1", "dtype": "float32", "shape": [1, 32, 320, 320]},
+            ],
+        },
+    )
+    meta = _build_meta("v1.0.0", ["platanus", "other-tree"], "a" * 40, tmp_path / "model.onnx", "8.5.2")
+    assert meta["lifecycle"] == "release"
+    assert meta["deployable"] is True
+
+
+def test_release_rejects_wrong_fixed_input_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "publish._inspect_onnx",
+        lambda _: {
+            "inputs": [{"name": "images", "dtype": "float32", "shape": [1, 3, 640, 640]}],
+            "outputs": [{"name": "output0", "dtype": "float32", "shape": [1, 38, 8400]}],
+        },
+    )
+    with pytest.raises(ValueError, match="fixed input contract"):
+        _build_meta("v1.0.0", ["platanus", "other-tree"], "a" * 40, tmp_path / "model.onnx", "8.5.2")
+
+
+def test_release_rejects_wrong_detection_channel_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "publish._inspect_onnx",
+        lambda _: {
+            "inputs": [{"name": "images", "dtype": "float32", "shape": [1, 3, 1280, 1280]}],
+            "outputs": [
+                {"name": "output0", "dtype": "float32", "shape": [1, 40, 33600]},
+                {"name": "output1", "dtype": "float32", "shape": [1, 32, 320, 320]},
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="38 channels"):
+        _build_meta("v1.0.0", ["platanus", "other-tree"], "a" * 40, tmp_path / "model.onnx", "8.5.2")
+
+
+def test_release_rejects_non_float32_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "publish._inspect_onnx",
+        lambda _: {
+            "inputs": [{"name": "images", "dtype": "float32", "shape": [1, 3, 1280, 1280]}],
+            "outputs": [
+                {"name": "output0", "dtype": "float16", "shape": [1, 38, 33600]},
+                {"name": "output1", "dtype": "float16", "shape": [1, 32, 320, 320]},
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="two float32 outputs"):
+        _build_meta("v1.0.0", ["platanus", "other-tree"], "a" * 40, tmp_path / "model.onnx", "8.5.2")
+
+
+def test_release_rejects_missing_mask_prototype(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "publish._inspect_onnx",
+        lambda _: {
+            "inputs": [{"name": "images", "dtype": "float32", "shape": [1, 3, 1280, 1280]}],
+            "outputs": [
+                {"name": "output0", "dtype": "float32", "shape": [1, 38, 33600]},
+                {"name": "output1", "dtype": "float32", "shape": [1, 16, 320, 320]},
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="mask prototype"):
+        _build_meta("v1.0.0", ["platanus", "other-tree"], "a" * 40, tmp_path / "model.onnx", "8.5.2")
+
+
+def test_train_commit_must_be_full_git_sha() -> None:
+    with pytest.raises(ValueError, match="40-character"):
+        _validate_train_commit("abc123")
+    _validate_train_commit("a" * 40)
+
+
+def test_release_bundle_renames_best_onnx_to_model_onnx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "best.onnx"
+    source.write_bytes(b"onnx")
+    monkeypatch.setattr(
+        "publish._build_meta",
+        lambda *args: {
+            "model_name": "tree-crown-yolo11-seg",
+            "version": "v1.0.0",
+            "lifecycle": "release",
+            "deployable": True,
+        },
+    )
+
+    bundle = _build_release_bundle(
+        source,
+        "v1.0.0",
+        ["platanus", "other-tree"],
+        "a" * 40,
+        "8.5.2",
+        tmp_path / "bundle",
+    )
+
+    assert bundle.onnx.name == "model.onnx"
+    assert bundle.onnx.read_bytes() == b"onnx"
+    lines = bundle.checksums.read_text(encoding="ascii").splitlines()
+    assert lines[0].endswith("  model.onnx")
+
+
+def test_release_rejects_prerelease_tag() -> None:
+    with pytest.raises(ValueError, match="vMAJOR.MINOR.PATCH"):
+        _validate_release("v1.0.0-rc1", ["platanus", "other-tree"])
+
+
+def test_production_repo_cannot_be_overridden() -> None:
+    with pytest.raises(ValueError, match="configured production"):
+        _validate_production_repo("zyzh0/tree-crown-yolo11-seg-staging", "git@hf.co:other/repo")

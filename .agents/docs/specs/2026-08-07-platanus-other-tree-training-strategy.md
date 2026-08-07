@@ -10,7 +10,11 @@ ONNX constraints, artifact versioning, and the definition of instance masks.
 
 ## Problem Statement
 
-The initial generic tree-crown pretraining stage on OAM-TCD is complete. The
+The initial generic tree-crown pretraining stage on OAM-TCD produced a usable
+pre-fix baseline checkpoint. A later code audit found canopy-only images that
+were incorrectly converted to background and disconnected RLE components that
+could produce distorted polygons. The corrected Stage 1a must therefore be
+rerun before its initializer is selected for downstream training. The
 repository has no locally captured and species-annotated Xi'an training data.
 The publicly accessible top-down tree datasets assessed for the next stage do
 not supply instance-segmentation labels for the four originally proposed Xi'an
@@ -59,15 +63,24 @@ This strategy does not cover:
 
 ## Dataset Assessment and Roles
 
-### OAM-TCD: Completed Stage 1a
+### OAM-TCD: Stage 1a Baseline and Required Rerun
 
 OAM-TCD supplies generic individual-tree masks and is already converted in
 this repository as a single `tree-crown` class. Its `tree-canopy` group labels
 remain excluded. Its generic labels cannot be mapped to `other-tree` because a
 generic tree may be platanus.
 
-The completed OAM-TCD checkpoint is a valid initialization point only. It is
-not a release artifact and must never be published as a two-class model.
+The pre-fix OAM-TCD checkpoint may be retained only as an experimental baseline.
+The corrected converter must omit canopy-only rows, redact excluded canopy
+regions in mixed rows while preserving individual-tree pixels, reject
+multi-component instances that cannot be represented faithfully by one YOLO
+polygon, deduplicate labels, validate
+split disjointness, and use `max_det: 1000` during dense validation. The corrected Stage 1a starts again from the official
+`yolo11n-seg.pt`; it must not continue from the pre-fix checkpoint.
+
+Stage 1a checkpoints are initialization artifacts, not release artifacts. They
+may be uploaded to `zyzh0/tree-crown-yolo11-seg-staging` with
+`deployable: false`, but they must never be published as two-class models.
 
 ### BAMFORESTS: Optional Stage 1b
 
@@ -160,7 +173,7 @@ capture scales.
 ## Training Flow
 
 ```text
-OAM-TCD generic single-class checkpoint (completed)
+OAM-TCD corrected generic single-class checkpoint
     |
     +-- local validation baseline ----------------------------------+
     |                                                                |
@@ -227,7 +240,7 @@ names and shapes must be inspected from the exported ONNX graph and written
 verbatim into `model.yaml`; the calculated channel count is a consistency
 check, not a substitute for graph inspection.
 
-Each release uploads ONNX, `model.yaml`, and `SHA256SUMS` to a new immutable
+Each production release uploads ONNX, `model.yaml`, and `SHA256SUMS` to a new immutable
 Hugging Face tag. The `model.yaml` class list must exactly match the root
 `data.yaml` class order. Checkpoints, datasets, ONNX files, and TensorRT
 engines remain outside Git.
@@ -247,5 +260,7 @@ The follow-on implementation plan must provide:
 - Chinese operator documentation for capture, annotation, split, and release
   procedures under `docs/`.
 
-Implementation must not download datasets into Git, publish pretraining
-weights, or silently overwrite an existing artifact tag.
+Implementation must not download datasets into Git or silently overwrite an
+existing artifact tag. Non-deployable checkpoints may be uploaded only to the
+separate staging repository with `artifact.yaml` and `deployable: false`.
+Only `publish.py` may create a deployable production artifact.

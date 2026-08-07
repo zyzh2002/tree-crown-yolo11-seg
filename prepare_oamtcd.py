@@ -5,21 +5,25 @@ the individual-tree instance annotations (COCO category 2) into YOLO11-seg
 normalized segment labels. Group/canopy annotations (category 1) are dropped.
 
 The output is a single-class "tree-crown" dataset used ONLY as weight
-initialization for the final Xi'an 4-species model. It is never published as a
-release artifact and never used as the public ABI class list.
+initialization for the final Xi'an model. It is never a deployable artifact and
+never used as the public ABI class list.
 
 Usage:
-    python prepare_oamtcd.py --output data/oamtcd
-    python prepare_oamtcd.py --output data/oamtcd --limit 200   # smoke subset
+    python prepare_oamtcd.py --output data/oamtcd-fixed
+    python prepare_oamtcd.py --output data/oamtcd-smoke --limit 200
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import shutil
 import subprocess
 import sys
+import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,7 +32,6 @@ import numpy as np
 import polars as pl
 from huggingface_hub import snapshot_download
 from pycocotools import mask as coco_mask
-from ultralytics.data.converter import merge_multi_segment
 
 logger = logging.getLogger("tree-crown.prepare.oamtcd")
 
@@ -40,6 +43,15 @@ KEEP_CATEGORY_IDS = {2}  # tree (individual); drop 1 = canopy (group)
 DROP_CATEGORY_IDS = [1]
 YOLO_CLASS_NAME = "tree-crown"
 YOLO_CLASS_ID = 0
+MIN_DOMINANT_COMPONENT_RATIO = 0.9
+
+
+@dataclass(frozen=True)
+class WriteResult:
+    """Result of converting one source row."""
+
+    written: bool
+    instances: int
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -60,6 +72,8 @@ def _git_commit() -> str:
 def download_raw(output: Path, revision: str = REVISION) -> Path:
     """Download the OAM-TCD parquet files into output/raw (pinned revision)."""
     raw = output / "raw"
+    if raw.exists():
+        shutil.rmtree(raw)
     snapshot_download(
         repo_id=REPO_ID,
         revision=revision,
@@ -67,6 +81,7 @@ def download_raw(output: Path, revision: str = REVISION) -> Path:
         allow_patterns=["data/*.parquet"],
         local_dir=str(raw),
     )
+    _write_raw_source(raw, revision)
     return raw
 
 
@@ -117,21 +132,23 @@ def segmentation_to_yolo(seg, width: int, height: int) -> list[float] | None:
         contours, _ = cv2.findContours(binary.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
-        pts = np.concatenate([c.reshape(-1, 2) for c in contours], axis=0)
-        pts = pts.astype(np.float64)
+        # YOLO-seg stores one polygon per instance. Reject truly disconnected
+        # instances rather than creating an artificial bridge between regions.
+        areas = [cv2.contourArea(contour) for contour in contours]
+        largest = max(range(len(contours)), key=areas.__getitem__)
+        if sum(areas) > 0 and areas[largest] / sum(areas) < MIN_DOMINANT_COMPONENT_RATIO:
+            return None
+        contour = contours[largest]
+        pts = contour.reshape(-1, 2).astype(np.float64)
     elif isinstance(seg, list) and len(seg) > 0:
-        if len(seg) > 1:
-            # COCO format: each polygon is a flat [x1, y1, x2, y2, ...] array.
-            # merge_multi_segment reshapes inputs to (N, 2) internally, so the
-            # explicit reshape keeps the points as contiguous (N, 2) for the
-            # downstream np.concatenate.
-            polygons = [np.array(p, dtype=np.float64).reshape(-1, 2) for p in seg]
-            # merge_multi_segment accepts polygon segments (reshapes internally);
-            # pyright's stub types them as list[list], not list[ndarray].
-            merged = merge_multi_segment(polygons)  # type: ignore[arg-type]
-            pts = np.concatenate(merged, axis=0).astype(np.float64)
-        else:
-            pts = np.array(seg[0], dtype=np.float64).reshape(-1, 2)
+        polygons = [np.array(p, dtype=np.float64).reshape(-1, 2) for p in seg if len(p) >= 6]
+        if not polygons:
+            return None
+        areas = [_polygon_area(polygon) for polygon in polygons]
+        largest = max(range(len(polygons)), key=areas.__getitem__)
+        if sum(areas) > 0 and areas[largest] / sum(areas) < MIN_DOMINANT_COMPONENT_RATIO:
+            return None
+        pts = polygons[largest]
     else:
         return None
 
@@ -174,38 +191,67 @@ def write_image_and_labels(
     images_dir: Path,
     labels_dir: Path,
     stats: dict,
-) -> int:
-    """Write one image .jpg and its YOLO .txt label into the split dirs.
+) -> WriteResult:
+    """Write one image and its YOLO label into the split dirs.
 
-    Returns the number of instances kept for this row.
+    Rows containing only excluded canopy-group annotations are omitted because
+    treating them as empty labels would incorrectly supervise visible trees as
+    background.
     """
     image_id = int(row["image_id"])
     width = int(row["width"])
     height = int(row["height"])
-    img_bytes = _extract_image_bytes(row)
+    annotations = annotations_to_instances(str(row["coco_annotations"]))
+    tree_annotations = [ann for ann in annotations if ann.get("category_id") in KEEP_CATEGORY_IDS]
+    has_canopy = any(ann.get("category_id") in DROP_CATEGORY_IDS for ann in annotations)
 
-    image_path = images_dir / f"{image_id}.jpg"
-    label_path = labels_dir / f"{image_id}.txt"
-
-    if img_bytes is None:
-        stats["decode_error"] += 1
-        return 0
-    image_path.write_bytes(img_bytes)
+    if has_canopy and not tree_annotations:
+        stats["dropped_canopy_only_images"] = stats.get("dropped_canopy_only_images", 0) + 1
+        return WriteResult(written=False, instances=0)
 
     lines: list[str] = []
-    kept = 0
-    for ann in annotations_to_instances(str(row["coco_annotations"])):
-        if ann["category_id"] not in KEEP_CATEGORY_IDS:
-            continue
+    seen: set[str] = set()
+    for ann in tree_annotations:
         coords = segmentation_to_yolo(ann["segmentation"], width, height)
         if coords is None:
             stats["dropped_invalid"] += 1
             continue
-        lines.append(" ".join([str(YOLO_CLASS_ID), *[f"{v:.6f}" for v in coords]]))
-        kept += 1
+        line = " ".join([str(YOLO_CLASS_ID), *[f"{v:.6f}" for v in coords]])
+        if line in seen:
+            stats["dropped_duplicate"] = stats.get("dropped_duplicate", 0) + 1
+            continue
+        seen.add(line)
+        lines.append(line)
+
+    if tree_annotations and not lines:
+        stats["dropped_no_valid_tree_images"] = stats.get("dropped_no_valid_tree_images", 0) + 1
+        return WriteResult(written=False, instances=0)
+
+    img_bytes = _extract_image_bytes(row)
+    if img_bytes is None:
+        stats["decode_error"] += 1
+        return WriteResult(written=False, instances=0)
+
+    if has_canopy:
+        img_bytes = _redact_canopy_regions(
+            img_bytes,
+            [ann for ann in annotations if ann.get("category_id") == 1],
+            tree_annotations,
+        )
+        if img_bytes is None:
+            stats["decode_error"] += 1
+            return WriteResult(written=False, instances=0)
+        stats["redacted_canopy_images"] = stats.get("redacted_canopy_images", 0) + 1
+        suffix = ".jpg"
+    else:
+        suffix = _image_suffix(row, img_bytes)
+
+    image_path = images_dir / f"{image_id}{suffix}"
+    label_path = labels_dir / f"{image_id}.txt"
+    image_path.write_bytes(img_bytes)
     label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="ascii")
-    stats["instances"] += kept
-    return kept
+    stats["instances"] += len(lines)
+    return WriteResult(written=True, instances=len(lines))
 
 
 def _extract_image_bytes(row: dict) -> bytes | None:
@@ -226,64 +272,160 @@ def _extract_image_bytes(row: dict) -> bytes | None:
     return None
 
 
-def prepare(output: Path, limit: int | None = None, skip_download: bool = False) -> dict:
+def _image_suffix(row: dict, image_bytes: bytes) -> str:
+    """Return an extension consistent with the source path or image magic."""
+    value = row.get("image")
+    if isinstance(value, dict):
+        source_path = value.get("path")
+        if isinstance(source_path, (str, Path)):
+            suffix = Path(source_path).suffix.lower()
+            if suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+                return suffix
+    if image_bytes.startswith((b"II*\x00", b"MM\x00*")):
+        return ".tif"
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    return ".jpg"
+
+
+def _redact_canopy_regions(
+    image_bytes: bytes,
+    canopy_annotations: list[dict],
+    tree_annotations: list[dict],
+) -> bytes | None:
+    """Black out excluded group-canopy regions so they are not supervised as background."""
+    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return None
+    height, width = image.shape[:2]
+    canopy_mask = _annotation_mask(canopy_annotations, width, height)
+    tree_mask = _annotation_mask(tree_annotations, width, height)
+    canopy_mask[tree_mask.astype(bool)] = 0
+    image[canopy_mask.astype(bool)] = 0
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    return encoded.tobytes() if ok else None
+
+
+def _annotation_mask(annotations: list[dict], width: int, height: int) -> np.ndarray:
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for ann in annotations:
+        segmentation = ann.get("segmentation")
+        if isinstance(segmentation, dict):
+            rle = segmentation
+            if not isinstance(rle.get("counts"), (str, bytes)):
+                rle = coco_mask.frPyObjects([rle], rle["size"][0], rle["size"][1])[0]  # type: ignore[arg-type]
+            decoded = coco_mask.decode(rle)  # type: ignore[arg-type]
+            if decoded is not None:
+                mask |= decoded.astype(np.uint8)
+        elif isinstance(segmentation, list):
+            polygons = [np.array(p, dtype=np.float64).reshape(-1, 2) for p in segmentation if len(p) >= 6]
+            if polygons:
+                cv2.fillPoly(mask, [polygon.round().astype(np.int32) for polygon in polygons], 1)
+    return mask
+
+
+def prepare(output: Path, limit: int | None = None, skip_download: bool = False, revision: str = REVISION) -> dict:
     """Run the full OAM-TCD -> YOLO-seg conversion and return the manifest."""
     output.mkdir(parents=True, exist_ok=True)
-    for split in ("train", "val", "test"):
-        (output / "images" / split).mkdir(parents=True, exist_ok=True)
-        (output / "labels" / split).mkdir(parents=True, exist_ok=True)
+    generated = (output / "images", output / "labels", output / "data.yaml", output / "manifest.json")
+    if any(path.exists() for path in generated):
+        raise FileExistsError(f"Generated output already exists under {output}; use a new output directory")
 
     raw = output / "raw"
     if skip_download:
         if not (raw / "data").exists():
             raise FileNotFoundError(f"--skip-download given but no data under {raw}")
+        source = _load_raw_source(raw)
+        if source.get("revision") != revision:
+            raise ValueError(
+                f"Existing raw revision {source.get('revision')!r} does not match requested revision {revision!r}"
+            )
     else:
-        raw = download_raw(output)
+        raw = download_raw(output, revision)
 
     df = load_frame(raw)
     if limit is not None:
         df = df.head(limit)
 
-    stats = {"instances": 0, "dropped_invalid": 0, "decode_error": 0}
+    stats = {
+        "instances": 0,
+        "dropped_invalid": 0,
+        "dropped_duplicate": 0,
+        "dropped_canopy_only_images": 0,
+        "dropped_no_valid_tree_images": 0,
+        "redacted_canopy_images": 0,
+        "decode_error": 0,
+    }
     split_counts = {"train": 0, "val": 0, "test": 0}
     split_instances = {"train": 0, "val": 0, "test": 0}
+    split_max_instances = {"train": 0, "val": 0, "test": 0}
     oam_split: dict[str, set[str]] = {"train": set(), "val": set(), "test": set()}
+    staging = Path(tempfile.mkdtemp(prefix=".oamtcd-convert-", dir=output))
+    try:
+        for split in ("train", "val", "test"):
+            (staging / "images" / split).mkdir(parents=True, exist_ok=True)
+            (staging / "labels" / split).mkdir(parents=True, exist_ok=True)
 
-    for row in df.iter_rows(named=True):
-        split = row_split(row)
-        split_counts[split] += 1
-        oam_split[split].add(str(row["oam_id"]))
-        split_instances[split] += write_image_and_labels(
-            row,
-            split,
-            output / "images" / split,
-            output / "labels" / split,
+        for row in df.iter_rows(named=True):
+            split = row_split(row)
+            result = write_image_and_labels(
+                row,
+                split,
+                staging / "images" / split,
+                staging / "labels" / split,
+                stats,
+            )
+            if not result.written:
+                continue
+            split_counts[split] += 1
+            split_instances[split] += result.instances
+            split_max_instances[split] = max(split_max_instances[split], result.instances)
+            oam_split[split].add(str(row["oam_id"]))
+
+        _validate_oam_splits(oam_split)
+        _write_data_yaml(staging)
+        _write_manifest(
+            staging,
+            df,
             stats,
+            split_counts,
+            split_instances,
+            oam_split,
+            limit,
+            revision=revision,
+            split_max_instances=split_max_instances,
+            raw_files=_raw_files(raw),
         )
-
-    _write_data_yaml(output)
-    _write_manifest(output, df, stats, split_counts, split_instances, oam_split, limit)
+        _install_generated(output, staging)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     return _load_manifest(output)
 
 
 def _write_data_yaml(output: Path) -> None:
-    content = (
-        f"path: {output.resolve()}\n"
-        "train: images/train\n"
-        "val: images/val\n"
-        "test: images/test\n"
-        "names:\n"
-        f"  {YOLO_CLASS_ID}: {YOLO_CLASS_NAME}\n"
-    )
+    content = f"train: images/train\nval: images/val\ntest: images/test\nnames:\n  {YOLO_CLASS_ID}: {YOLO_CLASS_NAME}\n"
     (output / "data.yaml").write_text(content, encoding="utf-8")
 
 
-def _write_manifest(output, df, stats, split_counts, split_instances, oam_split, limit) -> None:
+def _write_manifest(
+    output,
+    df,
+    stats,
+    split_counts,
+    split_instances,
+    oam_split,
+    limit,
+    revision: str = REVISION,
+    split_max_instances: dict[str, int] | None = None,
+    raw_files: list[dict] | None = None,
+) -> None:
+    split_max_instances = split_max_instances or {"train": 0, "val": 0, "test": 0}
     manifest = {
         "source": {
             "repo_id": REPO_ID,
-            "revision": REVISION,
+            "revision": revision,
             "license": "cc-by-4.0",
+            "files": raw_files or [],
         },
         "created_at": datetime.now(timezone.utc).isoformat(),
         "train_commit": _git_commit(),
@@ -296,6 +438,7 @@ def _write_manifest(output, df, stats, split_counts, split_instances, oam_split,
             s: {
                 "n_images": split_counts[s],
                 "n_instances": split_instances[s],
+                "max_instances_per_image": split_max_instances[s],
                 "oam_ids": sorted(oam_split[s]),
             }
             for s in ("train", "val", "test")
@@ -306,6 +449,63 @@ def _write_manifest(output, df, stats, split_counts, split_instances, oam_split,
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _validate_oam_splits(oam_split: dict[str, set[str]]) -> None:
+    """Reject source groups assigned to more than one split."""
+    conflicts = (
+        (oam_split["train"] & oam_split["val"])
+        | (oam_split["train"] & oam_split["test"])
+        | (oam_split["val"] & oam_split["test"])
+    )
+    if conflicts:
+        sample = ", ".join(sorted(conflicts)[:10])
+        raise ValueError(f"oam_id appears in multiple splits: {sample}")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _raw_files(raw: Path) -> list[dict]:
+    return [
+        {"path": str(path.relative_to(raw)), "size": path.stat().st_size, "sha256": _sha256(path)}
+        for path in sorted((raw / "data").glob("*.parquet"))
+    ]
+
+
+def _write_raw_source(raw: Path, revision: str) -> None:
+    source = {"repo_id": REPO_ID, "revision": revision, "files": _raw_files(raw)}
+    (raw / "source.json").write_text(json.dumps(source, indent=2), encoding="utf-8")
+
+
+def _load_raw_source(raw: Path) -> dict:
+    path = raw / "source.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Raw provenance missing: {path}. Download the pinned revision again instead of using --skip-download."
+        )
+    source = json.loads(path.read_text(encoding="utf-8"))
+    expected = {item["path"]: item for item in source.get("files", [])}
+    actual = {item["path"]: item for item in _raw_files(raw)}
+    if expected != actual:
+        raise ValueError("Existing raw parquet files do not match raw/source.json checksums")
+    return source
+
+
+def _install_generated(output: Path, staging: Path) -> None:
+    """Replace generated dataset files only after conversion succeeds."""
+    for name in ("images", "labels", "data.yaml", "manifest.json"):
+        destination = output / name
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        elif destination.exists():
+            destination.unlink()
+        shutil.move(str(staging / name), str(destination))
+
+
 def _load_manifest(output: Path) -> dict:
     with (output / "manifest.json").open("r", encoding="utf-8") as fh:
         return json.load(fh)
@@ -313,7 +513,7 @@ def _load_manifest(output: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare OAM-TCD for YOLO11-seg pretraining.")
-    parser.add_argument("--output", default="data/oamtcd", help="Output directory (git-ignored).")
+    parser.add_argument("--output", default="data/oamtcd-fixed", help="Output directory (git-ignored).")
     parser.add_argument("--limit", type=int, default=None, help="Only process first N rows (smoke).")
     parser.add_argument("--skip-download", action="store_true", help="Use existing downloaded parquet.")
     parser.add_argument("--revision", default=REVISION, help="Pinned HF revision.")
@@ -322,7 +522,12 @@ def main() -> int:
 
     _setup_logging(args.verbose)
     try:
-        manifest = prepare(Path(args.output), limit=args.limit, skip_download=args.skip_download)
+        manifest = prepare(
+            Path(args.output),
+            limit=args.limit,
+            skip_download=args.skip_download,
+            revision=args.revision,
+        )
         logger.info("OAM-TCD prepared. Manifest at %s", Path(args.output) / "manifest.json")
         logger.info("Split: %s", manifest["split"])
         return 0
