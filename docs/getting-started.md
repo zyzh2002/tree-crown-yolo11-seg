@@ -47,10 +47,15 @@ data/
 # 1. 转换（下载约 3.5 GB，预留 10-20 GB 磁盘）
 .venv/bin/python prepare_oamtcd.py --output data/oamtcd
 
-# 2. 预训练（batch 从 1 起步，实测后升 2/4）
+# 2. 预训练（batch 按平台显存实测，详见下方说明）
 .venv/bin/python train.py --config configs/pretrain-oamtcd.yaml
 ```
 
+- 预训练配置 `configs/pretrain-oamtcd.yaml` 的 `batch` 是**多卡全局 batch**：
+  - 8GB 单卡（RTX 2070 Super）用 `batch=2`。
+  - 双 V100 32GB 用全局 `batch=4`（每卡 2），`device: "4,5"`（同 NUMA 节点，避免与
+    其他用户共享 GPU 0/1 造成 DDP rank 同步变慢）。
+- 换新平台**必须先跑 1 epoch** 确认显存和验证阶段不 OOM，再跑完整训练。
 - 转换产物含 `data.yaml`（单类 `tree-crown`）与 `manifest.json`（split 统计、`oam_id`
   跨 split 保证、来源 revision）。
 - 用 `--limit N` 可先做小子集冒烟：`.venv/bin/python prepare_oamtcd.py --output data/oamtcd-smoke --limit 40`。

@@ -2,7 +2,7 @@
 name = "tree-crown-training"
 version = "0.1.0"
 description = "Training side of the tree-crown YOLO11-seg detection stack: train, export ONNX, publish to an HF private repo."
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 readme = "README.md"
 license = { text = "MIT" }
 dependencies = [
@@ -11,6 +11,7 @@ dependencies = [
     "huggingface-hub>=0.24.0",
     "pyyaml>=6.0",
     "torch>=2.0.0",
+    "torchvision>=0.15.0",
     "numpy>=1.24.0",
 ]
 
@@ -29,6 +30,9 @@ data = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+py-modules = ["export", "prepare_oamtcd", "publish", "train"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
@@ -46,3 +50,12 @@ indent-style = "space"
 
 [tool.uv]
 index-url = "https://mirrors.cernet.edu.cn/pypi/simple/"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

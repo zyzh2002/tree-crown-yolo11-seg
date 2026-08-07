@@ -184,3 +184,59 @@ docs: document OAM-TCD pretraining workflow and reject geotree
 - ⚠️ **根 `data.yaml` 与 OAM 单类 `data.yaml` 是两份不同文件**，切勿混淆。
 - ⚠️ **OAM-TCD 预训练产物绝不能 publish**（仅作 4 类模型的初始化权重）。
 - ⚠️ **`data/oamtcd/` 不进 git**，换平台后需重新转换或迁移原始 parquet。
+
+## 10. 新平台实测更新（V100 8 卡服务器，2026-08-06）
+
+本节记录原交接文档之后，在 8×V100 32GB 服务器上执行的实测结论。**下文若无标注，均指该服务器环境。**
+
+### 10.1 环境重建（关键！V100 必须用 cu126）
+
+- 服务器驱动 580.x 显示 "CUDA Version: 13.0"，但 **torch 2.13.0+cu130 不含 Volta (sm_70) kernel**，
+  在 V100 上直接报 `no kernel image is available for execution on the device`。
+- PyTorch 官方支持矩阵：**cu126 build 才含 Volta (sm_70)**；cu128/cu130 已移除（NVIDIA 上游决定）。
+- 因此 `pyproject.toml` 新增 `[tool.uv.sources]` + `[[tool.uv.index]]` 把 `torch`/`torchvision`
+  固定解析到 `https://download.pytorch.org/whl/cu126`，并锁定 `requires-python = ">=3.12,<3.13"`，
+  新增 `.python-version`（3.12）。
+- 重建命令：`rm -rf .venv uv.lock && uv sync --extra dev --extra data`。
+- setuptools 会误把 `data/`、`runs/` 当顶层包，`pyproject.toml` 已加 `[tool.setuptools] py-modules = [...]`。
+
+### 10.2 OAM-TCD 数据特征（OOM 根因）
+
+- **高实例密度**：3492 张训练图，每图实例均值 57、中位 32、**最大 870**；18.6% 的图 >100 实例。
+- 分割 mask 内存随 **batch 内实例总数** 增长，单 batch 混入高密图即可峰值 OOM —— 即使 32GB V100。
+- 这解释了原交接文档 "batch=4 验证 OOM" 是数据特性，不是 8GB 显存太小。
+
+### 10.3 DDP 双卡实测结论
+
+- **双卡 DDP 可用**：GPU4/5（同 NUMA 节点，NODE 直连）双卡 batch=4 完整跑通 1 epoch（训练+验证，无 OOM）。
+- **GPU0/1 曾"看似卡死"的真相**：当时 GPU0/1 被其他用户任务占用，DDP rank 同步变慢；
+  日志最终只有我误判后手动 `kill` 的 SIGTERM（`SignalException: got signal 15`），
+  没有任何 NCCL/DDP 自身错误。**共享 GPU 上不要跑 DDP**，等空闲卡或换卡。
+- 诊断手段：启动时加 `NCCL_DEBUG=INFO` 可看到 NCCL 初始化；出现
+  `Starting training for 1 epochs...` 即成功进入训练循环，需耐心等待不要过早 kill。
+
+### 10.4 正式预训练配置（当前生效）
+
+```yaml
+# configs/pretrain-oamtcd.yaml
+batch: 4            # 全局 batch，双卡每卡 2
+device: "4,5"       # 同 NUMA 节点的空闲 V100
+workers: 4
+epochs: 50
+```
+
+- 训练输出：`runs/segment/oamtcd-pretrain-<n>/weights/best.pt`（目录名带自动递增后缀）。
+- 正式训练进程以 `setsid nohup ... > .local/oamtcd-pretrain.log 2>&1 < /dev/null &` 后台运行。
+- 进度查看：`tail -2 runs/segment/oamtcd-pretrain-*/results.csv`（每行 = 1 个 epoch）。
+
+### 10.5 实测性能与效果
+
+- 双卡每 epoch ≈ 0.048 h（约 2.9 分钟），50 epoch 约 2.4 小时。
+- 训练至 epoch 31：box_loss 2.90→2.35、seg_loss 2.66→1.56，mask mAP50-95 0.32→0.50，持续收敛。
+- 尚未看到平台期，50 epoch 设置合理；若指标仍升可 `--resume` 续训。
+
+### 10.6 交接状态
+
+- **未提交改动**（待训练完成后确认/提交）：`pyproject.toml`、`uv.lock`、`.python-version`、
+  `configs/pretrain-oamtcd.yaml`、`docs/getting-started.md`、本文件。
+- 训练完成后下一步：验收 `best.pt`/`last.pt`/`results.csv`，然后进入四类微调或按需导出。

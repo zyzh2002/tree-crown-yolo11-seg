@@ -17,17 +17,19 @@ task: segment
 imgsz: 1280
 
 epochs: 50
-# GPU memory is the binding constraint (8 GiB, RTX 2070 Super). Measured on the
-# full 3492-image data: batch 4 trains fine but OOMs during the per-epoch
-# validation (val reuses the training batch while training state is resident);
-# batch 2 trains stably with high GPU utilization. Use batch 2.
-batch: 2
+# OAM-TCD has very high instance density (up to 870 instances/image, 18% of
+# images >100). Segmentation mask memory scales with the number of instances in
+# a batch. DDP on idle GPUs 4/5 validated with batch=4 (2/rank train, 4/rank
+# val) with no OOM; on busy GPUs (0/1, other users) DDP appeared to hang but
+# was just rank-sync slowdown from shared-GPU contention.
+batch: 4
 
-# Training device: auto-select GPU if available.
-device: 0
+# Training devices: two idle V100 GPUs on the same NUMA node (NODE link).
+# Do NOT use GPUs 0/1 when other users' jobs are running on them.
+device: "4,5"
 
-# System RAM is 11 GiB (WSL, 16 cores). workers 4 balances dataloader
-# throughput against the prefetch_factor=4 memory each worker holds.
+# System RAM is 62 GiB (192 cores). workers 4 balances dataloader throughput
+# against the prefetch_factor=4 memory each of the 8 total workers holds.
 workers: 4
 
 # Reproducibility.

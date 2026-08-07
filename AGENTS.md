@@ -60,6 +60,13 @@ docs are updated deliberately, in Chinese.
 uv sync                     # or: pip install -e .
 ```
 
+- Python is pinned to 3.12 (`.python-version`); `torch`/`torchvision` resolve from the
+  PyTorch **cu126** index via `[tool.uv.sources]` in `pyproject.toml`.
+- **V100 (compute capability 7.0) requirement:** torch builds for cu128/cu130 do NOT ship
+  Volta (sm_70) kernels and fail with `no kernel image is available`. Only cu126 (and older)
+  builds support V100. Do not remove the cu126 index pin.
+- After editing `pyproject.toml`, rebuild from scratch: `rm -rf .venv uv.lock && uv sync --extra dev --extra data`.
+
 ### Train
 
 ```bash
