@@ -28,12 +28,10 @@ names:
 基于：main（含已提交的 7c5e4b3 配置修复）
 ```
 
-### 工作区改动（未提交）
-```
-?? HANDOFF-OAMTCD.md          # 本交接文档（git 忽略，工作产物）
-```
+### 工作区状态
 
-所有代码改动均已提交（见下）。工作区干净，仅剩本交接文档未跟踪。
+所有代码、配置和测试改动均已提交（见下）。训练产物位于 git-ignored 的
+`runs/`，数据位于 git-ignored 的 `data/`，未上传 HF。
 
 ### 已完成的提交（在 feat/oamtcd-pretraining 上）
 ```
@@ -53,7 +51,7 @@ e0f2858 feat: add OAM-TCD single-class tree-crown pretraining config
 7c5e4b3 fix: correct YOLO11-seg model name and conservative default batch
 ```
 
-**测试**：`pytest` 全绿（30 passed）。`ruff check .` / `ruff format --check .` 干净。
+**测试**：最近一次完整测试为 `63 passed`。`ruff check .` / `ruff format --check .` 干净。
 
 ## 3. 已完成的工作
 
@@ -109,14 +107,13 @@ data = [
 
 ## 4.5 剩余工作（换更高性能 GPU 平台后执行）
 
-**当前这台 RTX 2070 Super 8GB + 11GB 系统内存跑 1280² 的 50-epoch 预训练太慢**（每 epoch ≈0.32h，50 epoch ≈16h，且显存余量极小），决定换更高性能 GPU 平台。
+该项已在 V100 服务器完成。以下命令保留为可复现实验流程。
 
 ```text
-1. 在新平台 uv sync --extra dev --extra data
-2. 转换：python prepare_oamtcd.py --output data/oamtcd-rgb
-3. 完整预训练：python train.py --config configs/pretrain-oamtcd.yaml
-   - 新平台显存更大可尝试 batch=4/8（先跑 1 epoch 验证 val 不 OOM 再升）
-4. 产物：runs/segment/oamtcd-pretrain-fixed/weights/best.pt（仅作初始化权重，绝不 publish）
+1. 在新平台执行 `uv sync --extra dev --extra data`
+2. 转换：`python prepare_oamtcd.py --output data/oamtcd-rgb`
+3. 完整预训练：`python train.py --config configs/pretrain-oamtcd.yaml`
+4. 产物只作为初始化权重，使用 `stage.py` 暂存，绝不使用 `publish.py`
 ```
 
 ## 5. 硬件 / 环境约束
@@ -213,29 +210,35 @@ docs: document OAM-TCD pretraining workflow and reject geotree
 - 诊断手段：启动时加 `NCCL_DEBUG=INFO` 可看到 NCCL 初始化；出现
   `Starting training for 1 epochs...` 即成功进入训练循环，需耐心等待不要过早 kill。
 
-### 10.4 正式预训练配置（当前生效）
+### 10.4 正式预训练配置（已完成）
 
 ```yaml
 # configs/pretrain-oamtcd.yaml
 batch: 4            # 全局 batch，双卡每卡 2
-device: "4,5"       # 同 NUMA 节点的空闲 V100
+device: "5,6"       # 同 NUMA 节点的空闲 V100
 workers: 4
 epochs: 50
 ```
 
-- 训练输出：`runs/segment/oamtcd-pretrain-<n>/weights/best.pt`（目录名带自动递增后缀）。
-- 正式训练进程以 `setsid nohup ... > .local/oamtcd-pretrain.log 2>&1 < /dev/null &` 后台运行。
-- 进度查看：`tail -2 runs/segment/oamtcd-pretrain-*/results.csv`（每行 = 1 个 epoch）。
+- 修复后数据：`data/oamtcd-rgb/`，所有输出图像统一为三通道 JPEG。
+- 正式输出：`runs/segment/oamtcd-stage1a-rgb-3/weights/best.pt`。
+- 训练通过用户级 systemd 单元运行，避免 API 命令超时终止 DDP。
+- 进度查看：`tail -2 runs/segment/oamtcd-stage1a-rgb-3/results.csv`（每行 = 1 个 epoch）。
 
-### 10.5 实测性能与效果（修复前 baseline）
+### 10.5 实测性能与效果（修复后 Stage 1a）
 
-- 双卡每 epoch ≈ 0.048 h（约 2.9 分钟），50 epoch 约 2.4 小时。
-- 训练至 epoch 31：box loss 1.90→1.62、seg loss 2.90→2.35、mask mAP50 0.32→0.50、mask mAP50-95 0.13→0.24。
-- 完整 50 epoch 后 `best.pt` 重验证约为 box mAP50-95 0.305、mask mAP50-95 0.266。
-- 该运行的数据转换后来发现 canopy-only 错误负样本和多连通 RLE 失真，因此只能作为修复前 baseline；修复后的 Stage 1a 必须重新转换并从官方权重重新训练。
+- 训练完成 `50/50` epochs，耗时 `7185.3 s`，约 2 小时。
+- 最终 box：precision `0.75443`、recall `0.64439`、mAP50 `0.72566`、mAP50-95 `0.41959`。
+- 最终 mask：precision `0.75623`、recall `0.61358`、mAP50 `0.69637`、mAP50-95 `0.35077`。
+- 最佳 mask mAP50-95 为 epoch 45 的 `0.35131`；box 最佳值为 epoch 50 的 `0.41959`。
+- `best.pt` SHA256：`83e2a1c11a8ccfd41207bbd127f4ea69eac270d1dcb54039ec4e71211aef73b9`。
+- 该 checkpoint 仍是单类 `tree-crown` 初始化权重，不具备生产两类 ABI。
 
-### 10.6 交接状态
+### 10.6 交接状态（已完成）
 
-- **未提交改动**（待训练完成后确认/提交）：`pyproject.toml`、`uv.lock`、`.python-version`、
-  `configs/pretrain-oamtcd.yaml`、`docs/getting-started.md`、本文件。
-- 下一步：使用修复后的转换器生成新数据目录，完成 smoke 后重新训练 Stage 1a，再进入两类微调。
+- 训练代码提交：`24e8baa1b8cea42b199fce01cb094e26e291e776`。
+- 数据 manifest：`data/oamtcd-rgb/manifest.json`，其中记录原始 parquet SHA256 和转换 commit
+  `a28b662df0d1cc7342167876cbbb4df602636be1`。
+- 初始化权重：`yolo11n-seg.pt`，SHA256 已写入正式运行的 `provenance.yaml`。
+- 运行 provenance：`runs/segment/oamtcd-stage1a-rgb-3/provenance.yaml`。
+- 下一阶段：使用 `best.pt` 做西安两类 `platanus` / `other-tree` 微调；训练完成前只能用 `stage.py` 暂存。
