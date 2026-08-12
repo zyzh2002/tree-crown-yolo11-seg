@@ -2,11 +2,22 @@
 
 ## Status
 
-Proposed training-data and model-ABI strategy. This document supersedes the
-four-species V1 class decision in
-`2026-08-05-tree-crown-age-estimation-design.md` for the first published
-model. The earlier document remains authoritative for deployment boundaries,
-ONNX constraints, artifact versioning, and the definition of instance masks.
+Validated for Stage 1a (generic single-class initializer); Stage 2 data and
+fine-tuning remain proposed. This document supersedes the four-species V1
+class decision in `2026-08-05-tree-crown-age-estimation-design.md` for the
+first published model. The earlier document remains authoritative for
+deployment boundaries, ONNX constraints, artifact versioning, and the
+definition of instance masks.
+
+### Stage 1a Validation
+
+The corrected OAM-TCD single-class pretraining run completed successfully and
+its checkpoint is accepted as the Stage 2 initialization weight. See the
+experiment record
+`.agents/docs/experiments/oamtcd-stage1a-r1.md` for metrics, hashes, and
+staging provenance. The checkpoint remains a single-class `tree-crown`
+initialization artifact, is not deployable, and must never be published via
+`publish.py`.
 
 ## Problem Statement
 

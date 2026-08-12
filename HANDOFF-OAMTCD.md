@@ -233,6 +233,7 @@ epochs: 50
 - 最佳 mask mAP50-95 为 epoch 45 的 `0.35131`；box 最佳值为 epoch 50 的 `0.41959`。
 - `best.pt` SHA256：`83e2a1c11a8ccfd41207bbd127f4ea69eac270d1dcb54039ec4e71211aef73b9`。
 - 该 checkpoint 仍是单类 `tree-crown` 初始化权重，不具备生产两类 ABI。
+- 完整实验记录见 `.agents/docs/experiments/oamtcd-stage1a-r1.md`（指标与哈希的权威来源）。
 
 ### 10.6 交接状态（已完成）
 

@@ -49,6 +49,9 @@ training data -> train/validate -> optional staging backup -> export ONNX -> pub
   and publishing workflows. Start at `docs/README.md`.
 - `.agents/docs/` — **Agent-facing, English.** Working artifacts: design specs
   (`specs/`), implementation plans (`plans/`), and handoffs (`handoffs/`).
+  Training and experiment records live under `experiments/` and are the
+  authoritative source for run metrics and artifact hashes; specs reference
+  them instead of duplicating performance numbers.
 - `AGENTS.md` / `CLAUDE.md` — Agent instructions at the repository root.
 - `README.md` — Human quick start, kept short; links into `docs/`.
 
