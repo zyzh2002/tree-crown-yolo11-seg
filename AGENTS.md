@@ -58,6 +58,20 @@ training data -> train/validate -> optional staging backup -> export ONNX -> pub
 Agents write working artifacts under `.agents/docs/`, never under `docs/`. Human
 docs are updated deliberately, in Chinese.
 
+## Skills
+
+This repository ships agent skills under `.agents/skills/`. Agents are encouraged
+to consult them when a task matches a skill's description:
+
+- Creative work / new features: `brainstorming`, `writing-plans`
+- Bug fixes: `systematic-debugging`
+- Commits: `git-commit` / `conventional-commit`
+- Hugging Face operations (publish/stage/download): `hf-cli`
+- Before claiming completion: `verification-before-completion`
+
+Loading a matching skill before starting the work is preferred, but user
+instructions always take precedence.
+
 ## Commands
 
 ### Setup
