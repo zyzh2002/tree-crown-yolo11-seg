@@ -8,6 +8,11 @@ paper reads, Hugging Face metadata audits, and direct downloads of dataset
 artifacts. No Stage 2 training has started; the acquisition decisions below
 are recommendations pending data requests and user confirmation.
 
+The deployment acquisition baseline was fixed on 2026-08-13: DJI Matrice 4T
+visible-light wide stream, 100 m AGL, top-down, nominal GSD ~9.4 cm/px (see
+"Deployment GSD Baseline"). The layered execution plan is recorded in
+`.agents/docs/plans/2026-08-13-stage2-data-acquisition-plan.md`.
+
 This document extends `2026-08-07-platanus-other-tree-training-strategy.md`,
 which remains the authority for the training flow, the two-class ABI, and the
 release gates.
@@ -33,6 +38,31 @@ A candidate is usable for Stage 2 only if it satisfies all of:
    municipal inventory, expert ground survey, or expert labeling).
 4. **Accessible license and distribution** for a graduation project,
    including non-public datasets obtainable by author request.
+
+## Deployment GSD Baseline
+
+Fixed on 2026-08-13 after inspecting the onboard repository
+`manifold-3-vision-detect`:
+
+- Camera: DJI Matrice 4T visible-light stream
+  (`DJI_LIVEVIEW_CAMERA_SOURCE_M4T_VIS`), wide camera 1/1.3-inch CMOS,
+  48 MP, 82 degrees diagonal FOV, 24 mm equivalent focal length.
+- Capture: 1440x1080 NV12 @ 30 fps, verified 0 drops on device.
+- Model input: fixed 1280x1280. The onboard preprocessor letterboxes the
+  1440x1080 frame to 1280x960 content with 160 px zero padding top and
+  bottom (scale 0.8889, nearest neighbor).
+- Flight altitude: fixed at **100 m AGL** (decision of 2026-08-13, chosen
+  below the 120 m regulatory ceiling with margin).
+- Nominal GSD: horizontal FOV 69.6 degrees, vertical 55.1 degrees, giving
+  GSD ~0.95 mm/px per meter of altitude; at 100 m this is **~9.4 cm/px**.
+  Must be calibrated on the first flight using the M4T laser rangefinder
+  and a known-size ground object because the liveview is a downsampled
+  sensor stream.
+- Crown scale: a platanus crown of 8-15 m spans 76-142 px inside the model
+  input.
+- Data acceptance band: external sources at 9-15 cm GSD are directly
+  usable with mild scale augmentation; 25 cm sources are 2.7x coarser and
+  are supplementary only (crown texture is lost).
 
 ## Investigated Datasets
 
@@ -178,12 +208,16 @@ panoramic images, not aerial. Confirmed the species list includes
 
 ## Open Questions
 
-- Deployment GSD: determines whether 15-25 cm sources can be used
-  directly or need mixed-GSD augmentation with local 2-5 cm imagery.
+- ~~Deployment GSD~~ - resolved: 100 m AGL gives a ~9.4 cm nominal GSD
+  baseline (calibrate on first flight).
+- Whether the acquisition campaign always uses the wide stream (82 degrees)
+  and not the 70 mm / 168 mm tele cameras; the training baseline assumes
+  the wide stream.
 - Whether the NYC census-to-tile join has acceptable positional noise at
   the chosen tile source (tree removals, GPS error, occlusions).
 - Enschede data holders' willingness to share crown polygons for a
   graduation project.
+- Whether the Sydney ArborCam authors release the Platanus mask data.
 
 ## References
 
