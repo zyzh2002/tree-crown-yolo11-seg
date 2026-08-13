@@ -75,6 +75,7 @@ Fixed on 2026-08-13 after inspecting the onboard repository
 | REGISTREE Pasadena Urban Trees | 15 cm Google tiles | points only | unconfirmed | Downgraded; Google ToS risk |
 | NYC 2015 Street Tree Census | no imagery | none | 87,014 points | Label source only; imagery must be fetched |
 | opentrees.org | no imagery | none | varies by city | Label aggregator only |
+| Paris `les-arbres` + IGN BD ORTHO | yes, 20 cm | points only | yes, 42,722 | Strong open-license volume source (investigated 2026-08-13) |
 | Enschede allergenic tree mapping | 25 cm RGB/CIR | polygons | yes | Promising; labels need request |
 | Sydney ArborCam study | 12 cm airborne | masks | 439 trees | Data not public; author request |
 | WHU-STree | street-level panoramic | 3D instances | yes | Excluded: not aerial |
@@ -164,6 +165,25 @@ accuracy 95.2% for Platanus, but the data are not public.
 of points with species. Contains no imagery of any kind; useful only as an
 alternative label aggregator.
 
+### Paris `les-arbres` + IGN BD ORTHO
+
+Investigating the NYC/Esri license question surfaced this previously
+unassessed route; verified live on 2026-08-13:
+
+- `les-arbres` (opendata.paris.fr): 219,408 records;
+  `genre=Platanus` returns 42,722 trees (queried via the API). Fields
+  include genus, species, address, trunk circumference, height, and
+  development stage. License ODbL.
+- Imagery: IGN BD ORTHO 20 cm RGB + CIR, Licence Ouverte / Etalab 2.0,
+  free download (geoservices.ign.fr), nationwide coverage, yearly
+  vintage since 2000.
+- Crown geometry is not shipped (point locations only), so the NYC
+  auto-delineation workflow applies: crop >= 256 px windows, delineate
+  crowns with the Stage 1a model or SAM, label every inventory point in
+  the window.
+- GSD: 20 cm is ~2.1x the ~9.65 cm/px deployment baseline and lands in
+  the supplementary band, not the direct 9-15 cm band.
+
 ### Enschede allergenic tree mapping
 
 GitHub `klavdix12/urban-allergenic-tree-mapping` (code DOI
@@ -195,14 +215,19 @@ panoramic images, not aerial. Confirmed the species list includes
    by the Stage 1a/1b model or SAM, and a 5-10% subset is manually verified
    against Street View/overhead imagery. Label evidence: authoritative
    municipal inventory, satisfying the strategy spec's traceability gate.
-2. **Small-pilot route: NEON PLOC.** Fetch the 10 cm tiles for the 9
+2. **Open-license volume route: Paris `les-arbres` + IGN BD ORTHO.** 42,722
+   Platanus inventory points joined with 20 cm open ortho tiles using the
+   same auto-delineation workflow as the NYC route; both inventory (ODbL)
+   and imagery (Etalab) are openly licensed, so no data request or tile
+   license risk. 20 cm GSD is supplementary-band only.
+3. **Small-pilot route: NEON PLOC.** Fetch the 10 cm tiles for the 9
    human-box crowns (and optionally the 67 DeepForest boxes after manual
    review), fix the DELA CRS error first, and produce a small high-quality
    platanus mask set for scale validation.
-3. **Requests to file:** Enschede crown polygons (primary), Sydney ArborCam
+4. **Requests to file:** Enschede crown polygons (primary), Sydney ArborCam
    data (secondary), REGISTREE Pasadena package (conditional, license
    check).
-4. **Excluded:** TreeCrown-MM (no Platanus), WHU-STree (viewpoint),
+5. **Excluded:** TreeCrown-MM (no Platanus), WHU-STree (viewpoint),
    GatorSense crops as mask supervision (classification only), fallback
    squares from DTA as mask supervision.
 
@@ -215,6 +240,9 @@ panoramic images, not aerial. Confirmed the species list includes
   the wide stream.
 - Whether the NYC census-to-tile join has acceptable positional noise at
   the chosen tile source (tree removals, GPS error, occlusions).
+- Whether the Paris inventory point positions are accurate enough for
+  crown-level crop joining, and whether 20 cm GSD transfers to the
+  ~9.65 cm/px deployment baseline for platanus crown texture.
 - Enschede data holders' willingness to share crown polygons for a
   graduation project.
 - Whether the Sydney ArborCam authors release the Platanus mask data.
@@ -242,5 +270,7 @@ panoramic images, not aerial. Confirmed the species list includes
   https://data.cityofnewyork.us/Environment/2015-Street-Tree-Census-Tree-Data/uvpi-gqnh
 - Pasadena Urban Trees: https://registree.ethz.ch/publications-and-dataset.html
 - opentrees.org: https://opentrees.org/
+- Paris `les-arbres`: https://opendata.paris.fr/explore/dataset/les-arbres/
+- IGN BD ORTHO: https://www.data.gouv.fr/fr/datasets/bd-ortho-r/
 - Enschede: https://github.com/klavdix12/urban-allergenic-tree-mapping
 - WHU-STree: https://github.com/WHU-USI3DV/WHU-STree

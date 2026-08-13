@@ -32,6 +32,7 @@ deployment GSD baseline fixed at 100 m AGL (~9.4 cm/px).
 | Source | Role |
 |---|---|
 | NYC 2015 Street Tree Census + Esri tiles | volume labels: 87,014 platanus points; auto-delineate crowns with the Stage 1a/1b model; exhaustive two-class labeling inside each crop window from inventory points |
+| Paris `les-arbres` + IGN BD ORTHO | volume labels: 42,722 platanus records (ODbL) joined with 20 cm open ortho (Etalab); same auto-delineation workflow as NYC; supplementary-band GSD |
 | BAMFORESTS (HF mirror `CanopyRS/BAMForests`) | optional Stage 1b generic pretraining, CC BY 4.0 |
 
 ### Excluded
@@ -50,9 +51,10 @@ squares, Pasadena REGISTREE (points only + Google ToS risk).
    state graduation-project research use and cite the paper.
 3. **Enschede email**: request crown polygon shapefiles + municipal
    inventory from the GitHub repo authors / Municipality of Enschede.
-4. **No application needed**: NYC census (Socrata API), BAMFORESTS HF,
-   Esri World Imagery tiles (prefer Esri over Google to avoid the Google
-   Maps ML-training prohibition).
+4. **No application needed**: NYC census (Socrata API), Paris
+   `les-arbres` (opendata.paris.fr API) + IGN BD ORTHO 20 cm ortho (free
+   download), BAMFORESTS HF, Esri World Imagery tiles (prefer Esri over
+   Google to avoid the Google Maps ML-training prohibition).
 
 ## Per-Source Build Steps
 
@@ -66,6 +68,20 @@ squares, Pasadena REGISTREE (points only + Google ToS risk).
    windows are exhaustive with respect to the inventory.
 5. Manually verify a 5-10% subset (crown match, removals, occlusions).
 6. Record source manifest: census revision, tile provider, crop hashes.
+
+### Paris + IGN (volume)
+
+1. Download `les-arbres` via the opendata.paris.fr API (ODbL); keep the
+   `genre=Platanus` subset plus the top negative genera for `other-tree`.
+2. Download IGN BD ORTHO 20 cm tiles (Licence Ouverte / Etalab 2.0) for
+   the chosen tree points.
+3. Apply the same workflow as NYC: crop >= 256 px windows, delineate
+   crowns with the Stage 1a model (or SAM), label every inventory point
+   in the window as platanus / other-tree.
+4. Record source manifest: dataset vintage, ortho vintage, licenses, crop
+   hashes.
+5. Treat as supplementary-band training data: 20 cm GSD is ~2.1x the
+   ~9.65 cm/px deployment baseline; never the sole fine-tuning source.
 
 ### NEON (precision pilot)
 
@@ -126,6 +142,9 @@ Stage 1a best.pt (existing)
   baseline but not for release-grade platanus fidelity.
 - NYC census (2015) vs current tile imagery has a time offset; removals
   and regrowth require verification.
+- Paris inventory points have positional uncertainty and no crown
+  geometry; auto-delineation inherits Stage 1a model bias, and the 20 cm
+  ortho GSD limits transfer to the ~9.65 cm/px deployment baseline.
 - Liveview GSD depends on the unverified 82-degree FOV assumption;
   calibrate with the laser rangefinder on the first flight.
 - The onboard letterbox (1280x960 content) must match training
