@@ -64,4 +64,5 @@ explicit = true
 [dependency-groups]
 dev = [
     "jupyter>=1.1.1",
+    "nbstripout>=0.9.1",
 ]
