@@ -58,19 +58,69 @@ training data -> train/validate -> optional staging backup -> export ONNX -> pub
 Agents write working artifacts under `.agents/docs/`, never under `docs/`. Human
 docs are updated deliberately, in Chinese.
 
-## Skills
+## Skills (Mandatory)
 
-This repository ships agent skills under `.agents/skills/`. Agents are encouraged
-to consult them when a task matches a skill's description:
+This repository ships agent skills under `.agents/skills/`. Skills are process
+controls, not optional reading. The following rules are mandatory:
 
-- Creative work / new features: `brainstorming`, `writing-plans`
-- Bug fixes: `systematic-debugging`
-- Commits: `git-commit` / `conventional-commit`
-- Hugging Face operations (publish/stage/download): `hf-cli`
-- Before claiming completion: `verification-before-completion`
+- Before taking action on a task, inspect the available skills and load every
+  skill that matches the task. A matching skill must be loaded even when the
+  change appears small, obvious, or documentation-only.
+- Load `using-superpowers` first when it is available. It defines the required
+  skill-discovery and hard-gate workflow for the session.
+- Read the loaded `SKILL.md` completely and follow its hard gates, required
+  questions, approval checkpoints, tool restrictions, and verification steps.
+  Do not replace a required skill workflow with personal judgment or a shorter
+  equivalent process.
+- If multiple skills apply, use process skills before implementation skills and
+  use verification skills before making completion claims. Do not skip a skill
+  because another skill appears to cover part of the same work.
+- Announce the relevant skill and its purpose in the progress update before
+  beginning the associated work. Never claim to have used a skill that was not
+  actually loaded with the skill tool.
+- User instructions take precedence over repository skills only when they
+  explicitly conflict. Record the conflict and follow the user's instruction;
+  otherwise the skill workflow remains mandatory.
 
-Loading a matching skill before starting the work is preferred, but user
-instructions always take precedence.
+### Required Skill Mapping
+
+- New behavior, creative work, or feature design: `brainstorming` before
+  implementation; obtain the approval required by that skill before editing.
+- A written specification or multi-step requirement: `writing-plans` before
+  touching implementation files; keep the plan in `.agents/docs/plans/`.
+- Executing an approved plan: `executing-plans` or
+  `subagent-driven-development`, as selected by the user or plan workflow.
+- Bug reports, regressions, unexpected behavior, or failed tests:
+  `systematic-debugging` before proposing or applying a fix.
+- Any feature or bugfix implementation: `test-driven-development` before
+  writing production code unless the user explicitly waives it.
+- Hugging Face authentication, download, upload, staging, or publication:
+  `hf-cli` before using the HF CLI or API.
+- Architecture changes or architecture documentation:
+  `architecture-blueprint-generator` when its documented scope applies.
+- Documentation authoring or restructuring: `documentation-writer` when its
+  documented scope applies; human-facing documentation remains Chinese and
+  agent-facing documentation remains English.
+- Code review requests or major changes before integration:
+  `requesting-code-review`; receiving review feedback requires
+  `receiving-code-review` before applying suggestions.
+- Commits or commit-message generation: `make-repo-contribution` first when
+  repository contribution guidance applies, then `git-commit` or
+  `conventional-commit` as appropriate. Never commit merely because a task is
+  complete.
+- Before claiming that work is fixed, complete, verified, or passing:
+  `verification-before-completion` with fresh command evidence.
+
+### Skill Stop Conditions
+
+- If a loaded skill requires user clarification or approval, stop and ask one
+  focused question; do not continue implementation on an assumption.
+- If a loaded skill requires a design or plan review, do not edit production
+  files until that checkpoint is satisfied.
+- If verification fails, report the actual failure and keep the task open;
+  do not claim completion based on intent, partial output, or an earlier run.
+- If no available skill matches the task, state that explicitly and proceed
+  using the repository instructions and the verification requirements above.
 
 ## Commands
 
