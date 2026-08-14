@@ -19,6 +19,7 @@ dependencies = [
 dev = [
     "ruff>=0.6.0",
     "pytest>=8.0.0",
+    "jupyter",
 ]
 data = [
     "datasets>=2.20.0",
@@ -59,3 +60,8 @@ torchvision = { index = "pytorch-cu126" }
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+]
